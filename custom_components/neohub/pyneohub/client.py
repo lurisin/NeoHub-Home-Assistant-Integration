@@ -437,3 +437,29 @@ class NeoHubClient:
                 "code": code,
             }
         )
+
+    async def arm_home_instant(
+        self, session_id: str, partition_number: int, code: str | None = None
+    ) -> None:
+        """Send an arm-home (stay) command with no entry delay (Stay Instant)."""
+        await self._send(
+            {
+                "type": "arm_home_instant",
+                "session_id": session_id,
+                "partition_number": partition_number,
+                "code": code,
+            }
+        )
+
+    async def arm_away_instant(
+        self, session_id: str, partition_number: int, code: str | None = None
+    ) -> None:
+        """Send an arm-away command with no entry delay (Away Instant)."""
+        await self._send(
+            {
+                "type": "arm_away_instant",
+                "session_id": session_id,
+                "partition_number": partition_number,
+                "code": code,
+            }
+        )

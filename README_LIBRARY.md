@@ -115,7 +115,11 @@ All registration methods return an unregister function.
 - `async arm_away(session_id: str, partition_number: int, code: str | None = None)`
 - `async arm_home(session_id: str, partition_number: int, code: str | None = None)`
 - `async arm_night(session_id: str, partition_number: int, code: str | None = None)`
+- `async arm_home_instant(session_id: str, partition_number: int, code: str | None = None)` - Stay arm with no entry delay
+- `async arm_away_instant(session_id: str, partition_number: int, code: str | None = None)` - Away arm with no entry delay
 - `async disarm(session_id: str, partition_number: int, code: str | None = None)`
+
+The `*_instant` commands need a NeoHub build that supports the `arm_home_instant` / `arm_away_instant` messages; older builds reply with an `error` message.
 
 ## License
 
