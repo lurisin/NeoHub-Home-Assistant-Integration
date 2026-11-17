@@ -14,6 +14,7 @@ This integration uses the [`pyneohub`](https://github.com/BrianHumlicek/NeoHub-H
 ## Features
 
 - **Alarm Control Panel** entities for each partition (arm away, arm home, arm night, disarm)
+- **Instant arming services** `neohub.arm_home_instant` and `neohub.arm_away_instant` (arm with no entry delay; optional `code`, see [Services](#services)). The partition still shows as Armed Home / Armed Away.
 - **Binary Sensor** entities for each zone (door, window, motion, smoke, etc.)
 - Real-time push updates via WebSocket — no polling
 - Automatic reconnection with exponential backoff
@@ -42,6 +43,30 @@ Copy the `custom_components/neohub` directory into your Home Assistant `config/c
    - **Port**: WebSocket port (default `8080`)
    - **Use SSL**: enable for `wss://` connections
    - **Access Token**: optional bearer token for authentication
+
+## Services
+
+Besides the standard alarm control panel actions, the integration adds two entity services that arm a partition with no entry delay:
+
+| Service                   | What it does                                                                              | Partition shows as |
+|---------------------------|-------------------------------------------------------------------------------------------|--------------------|
+| `neohub.arm_home_instant` | Stay arm with no entry delay ("Stay Instant", ITv2 arming mode `StayArmWithNoEntryDelay`) | Armed Home         |
+| `neohub.arm_away_instant` | Away arm with no entry delay ("Away Instant", ITv2 arming mode `AwayArmWithNoEntryDelay`) | Armed Away         |
+
+Both take an optional `code`. If it is left out or empty, the entity's default code is used if one is set in Home Assistant, otherwise NeoHub's default access code. The entity's supported features and states are unchanged; there is no separate "instant" state.
+
+```yaml
+action: neohub.arm_home_instant
+target:
+  entity_id: alarm_control_panel.example
+```
+
+Notes:
+
+- These services **require a NeoHub build with `arm_home_instant` / `arm_away_instant` support**. An older NeoHub replies with an error and nothing is armed.
+- `arm_away_instant` (arming mode 8) is untested on a real panel.
+- The call is fire-and-forget: Home Assistant does not fail the action if NeoHub or the panel rejects the command. Check the log (`NeoHub server error: ...`) or the partition state.
+- The services exist only once the NeoHub config entry is loaded. Until then (for example while NeoHub is unreachable at startup), calling them fails with an "action not found" error. After that they stay registered until Home Assistant restarts. If the entry is later unloaded (disabled, deleted or reloading) or the alarm panel entity is unavailable (NeoHub disconnected), a call does nothing and does not fail; at most Home Assistant logs a warning that the entity is missing or not currently available. Check the partition state.
 
 ## Entity Model
 
@@ -116,6 +141,32 @@ Request the complete state of all sessions, partitions, and zones. Sent on initi
 ```json
 {
   "type": "arm_night",
+  "session_id": "abc123",
+  "partition_number": 1,
+  "code": "1234"
+}
+```
+
+#### `arm_home_instant`
+
+Stay arm with no entry delay (ITv2 arming mode `StayArmWithNoEntryDelay`). NeoHub reports the partition as `armed_home`. Requires a NeoHub build that supports this message.
+
+```json
+{
+  "type": "arm_home_instant",
+  "session_id": "abc123",
+  "partition_number": 1,
+  "code": "1234"
+}
+```
+
+#### `arm_away_instant`
+
+Away arm with no entry delay (ITv2 arming mode `AwayArmWithNoEntryDelay`). NeoHub reports the partition as `armed_away`. Requires a NeoHub build that supports this message.
+
+```json
+{
+  "type": "arm_away_instant",
   "session_id": "abc123",
   "partition_number": 1,
   "code": "1234"

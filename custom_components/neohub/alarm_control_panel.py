@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import voluptuous as vol
+
 from homeassistant.components.alarm_control_panel import (
     AlarmControlPanelEntity,
     AlarmControlPanelEntityFeature,
@@ -12,7 +14,9 @@ from homeassistant.components.alarm_control_panel import (
     CodeFormat,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import ATTR_CODE
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -21,6 +25,11 @@ from .const import DOMAIN, SIGNAL_CONNECTION_STATE, SIGNAL_STATE_UPDATED
 from .coordinator import NeoHubCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+SERVICE_ARM_HOME_INSTANT = "arm_home_instant"
+SERVICE_ARM_AWAY_INSTANT = "arm_away_instant"
+
+ARM_INSTANT_SCHEMA = {vol.Optional(ATTR_CODE): cv.string}
 
 STATUS_MAP: dict[str, AlarmControlPanelState] = {
     "disarmed": AlarmControlPanelState.DISARMED,
@@ -60,6 +69,18 @@ async def async_setup_entry(
             )
 
     async_add_entities(entities)
+
+    platform = entity_platform.async_get_current_platform()
+    platform.async_register_entity_service(
+        SERVICE_ARM_HOME_INSTANT,
+        ARM_INSTANT_SCHEMA,
+        "async_alarm_arm_home_instant",
+    )
+    platform.async_register_entity_service(
+        SERVICE_ARM_AWAY_INSTANT,
+        ARM_INSTANT_SCHEMA,
+        "async_alarm_arm_away_instant",
+    )
 
 
 class DscAlarmPanel(AlarmControlPanelEntity):
@@ -152,6 +173,26 @@ class DscAlarmPanel(AlarmControlPanelEntity):
         """Send arm night command."""
         await self._coordinator.client.arm_night(
             self._session_id, self._partition_number, code
+        )
+
+    # The neohub.*_instant entity services call the two methods below
+    # directly, so they apply the same code handling as the built-in arm
+    # services: an empty code becomes the entity's default code or None
+    # (NeoHub only falls back to its own default access code on null).
+    async def async_alarm_arm_home_instant(self, code: str | None = None) -> None:
+        """Send arm home (stay) command with no entry delay (Stay Instant)."""
+        await self._coordinator.client.arm_home_instant(
+            self._session_id,
+            self._partition_number,
+            self.check_code_arm_required(code),
+        )
+
+    async def async_alarm_arm_away_instant(self, code: str | None = None) -> None:
+        """Send arm away command with no entry delay (Away Instant)."""
+        await self._coordinator.client.arm_away_instant(
+            self._session_id,
+            self._partition_number,
+            self.check_code_arm_required(code),
         )
 
     async def async_alarm_disarm(self, code: str | None = None) -> None:

@@ -22,5 +22,27 @@
     "abort": {
       "already_configured": "This NeoHub is already configured."
     }
+  },
+  "services": {
+    "arm_home_instant": {
+      "name": "Arm home (instant)",
+      "description": "Arms the partition in Stay mode with no entry delay (Stay Instant). The partition shows as Armed Home.",
+      "fields": {
+        "code": {
+          "name": "Code",
+          "description": "Access code. Leave empty to use the entity's default code if one is set in Home Assistant, otherwise NeoHub's default access code."
+        }
+      }
+    },
+    "arm_away_instant": {
+      "name": "Arm away (instant)",
+      "description": "Arms the partition in Away mode with no entry delay (Away Instant). The partition shows as Armed Away.",
+      "fields": {
+        "code": {
+          "name": "Code",
+          "description": "Access code. Leave empty to use the entity's default code if one is set in Home Assistant, otherwise NeoHub's default access code."
+        }
+      }
+    }
   }
 }

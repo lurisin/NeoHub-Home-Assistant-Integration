@@ -1,0 +1,23 @@
+arm_home_instant:
+  target:
+    entity:
+      integration: neohub
+      domain: alarm_control_panel
+  fields:
+    code:
+      required: false
+      selector:
+        text:
+          type: password
+
+arm_away_instant:
+  target:
+    entity:
+      integration: neohub
+      domain: alarm_control_panel
+  fields:
+    code:
+      required: false
+      selector:
+        text:
+          type: password
