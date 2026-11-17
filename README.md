@@ -84,11 +84,13 @@ Zones are session-level entities that can be associated with one or more partiti
 |----------------|-----------------|
 | `disarmed`     | Disarmed        |
 | `armed_away`   | Armed Away      |
-| `armed_stay`   | Armed Home      |
+| `armed_home`   | Armed Home      |
 | `armed_night`  | Armed Night     |
-| `exit_delay`   | Arming          |
-| `entry_delay`  | Pending         |
+| `arming`       | Arming          |
+| `pending`      | Pending         |
 | `triggered`    | Triggered       |
+
+`arming` means the exit delay is running and `pending` means the entry delay is running. Before NeoHub has read a partition's status it reports `unknown`, which shows as Unknown in Home Assistant.
 
 ---
 
@@ -232,7 +234,7 @@ Sent in response to `get_full_state`. Contains the complete hierarchy.
 }
 ```
 
-**`status`** values: `disarmed`, `armed_away`, `armed_stay`, `armed_night`, `exit_delay`, `entry_delay`, `triggered`
+**`status`** values: `disarmed`, `armed_away`, `armed_home`, `armed_night`, `arming`, `pending`, `triggered` (`unknown` until NeoHub has read the partition's status)
 
 **`device_class`** values: `door`, `window`, `motion`, `smoke`, `gas`, `moisture`, `vibration`, `safety`
 
