@@ -45,7 +45,7 @@
   "services": {
     "arm_home_instant": {
       "name": "Inserisci in casa (istantaneo)",
-      "description": "Inserisce la partizione in modalità In casa (Stay) senza ritardo di ingresso (Stay Instant). La partizione viene mostrata come Attivo in casa.",
+      "description": "Inserisce la partizione in modalità In casa (Stay) senza ritardo di ingresso (Stay Instant). La partizione viene mostrata come «Attivo in casa».",
       "fields": {
         "code": {
           "name": "Codice",
@@ -55,7 +55,7 @@
     },
     "arm_away_instant": {
       "name": "Inserisci fuori casa (istantaneo)",
-      "description": "Inserisce la partizione in modalità Fuori casa (Away) senza ritardo di ingresso (Away Instant). La partizione viene mostrata come Attivo fuori casa.",
+      "description": "Inserisce la partizione in modalità Fuori casa (Away) senza ritardo di ingresso (Away Instant). La partizione viene mostrata come «Attivo fuori casa».",
       "fields": {
         "code": {
           "name": "Codice",
