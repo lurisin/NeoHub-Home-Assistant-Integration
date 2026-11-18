@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import voluptuous as vol
@@ -16,13 +17,20 @@ from homeassistant.components.alarm_control_panel import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_CODE
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, SIGNAL_CONNECTION_STATE, SIGNAL_STATE_UPDATED
+from .const import (
+    DOMAIN,
+    PANEL_RESPONSE_NOT_READY,
+    SIGNAL_CONNECTION_STATE,
+    SIGNAL_STATE_UPDATED,
+)
 from .coordinator import NeoHubCoordinator
+from .pyneohub import NeoHubCommandError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -157,23 +165,43 @@ class DscAlarmPanel(AlarmControlPanelEntity):
         """Handle a connection state change."""
         self.async_write_ha_state()
 
+    async def _async_send_command(
+        self,
+        command: Callable[[str, int, str | None], Awaitable[None]],
+        code: str | None,
+        *,
+        arming: bool = True,
+    ) -> None:
+        """Send a command and raise HomeAssistantError if NeoHub reports a failure.
+
+        A NeoHub without command results never reports one, so with it the
+        call returns as soon as the command is sent (as before).
+        """
+        try:
+            await command(self._session_id, self._partition_number, code)
+        except NeoHubCommandError as err:
+            if arming and err.code == PANEL_RESPONSE_NOT_READY:
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="not_ready_to_arm",
+                ) from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="command_failed",
+                translation_placeholders={"message": err.message},
+            ) from err
+
     async def async_alarm_arm_away(self, code: str | None = None) -> None:
         """Send arm away command."""
-        await self._coordinator.client.arm_away(
-            self._session_id, self._partition_number, code
-        )
+        await self._async_send_command(self._coordinator.client.arm_away, code)
 
     async def async_alarm_arm_home(self, code: str | None = None) -> None:
         """Send arm home (stay) command."""
-        await self._coordinator.client.arm_home(
-            self._session_id, self._partition_number, code
-        )
+        await self._async_send_command(self._coordinator.client.arm_home, code)
 
     async def async_alarm_arm_night(self, code: str | None = None) -> None:
         """Send arm night command."""
-        await self._coordinator.client.arm_night(
-            self._session_id, self._partition_number, code
-        )
+        await self._async_send_command(self._coordinator.client.arm_night, code)
 
     # The neohub.*_instant entity services call the two methods below
     # directly, so they apply the same code handling as the built-in arm
@@ -181,22 +209,20 @@ class DscAlarmPanel(AlarmControlPanelEntity):
     # (NeoHub only falls back to its own default access code on null).
     async def async_alarm_arm_home_instant(self, code: str | None = None) -> None:
         """Send arm home (stay) command with no entry delay (Stay Instant)."""
-        await self._coordinator.client.arm_home_instant(
-            self._session_id,
-            self._partition_number,
+        await self._async_send_command(
+            self._coordinator.client.arm_home_instant,
             self.check_code_arm_required(code),
         )
 
     async def async_alarm_arm_away_instant(self, code: str | None = None) -> None:
         """Send arm away command with no entry delay (Away Instant)."""
-        await self._coordinator.client.arm_away_instant(
-            self._session_id,
-            self._partition_number,
+        await self._async_send_command(
+            self._coordinator.client.arm_away_instant,
             self.check_code_arm_required(code),
         )
 
     async def async_alarm_disarm(self, code: str | None = None) -> None:
         """Send disarm command."""
-        await self._coordinator.client.disarm(
-            self._session_id, self._partition_number, code
+        await self._async_send_command(
+            self._coordinator.client.disarm, code, arming=False
         )

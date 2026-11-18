@@ -23,6 +23,14 @@
       "already_configured": "This NeoHub is already configured."
     }
   },
+  "exceptions": {
+    "command_failed": {
+      "message": "NeoHub command failed: {message}"
+    },
+    "not_ready_to_arm": {
+      "message": "Partition not ready to arm (zone open)"
+    }
+  },
   "services": {
     "arm_home_instant": {
       "name": "Arm home (instant)",
