@@ -79,7 +79,7 @@ A NeoHub that lists `command_result` in its `capabilities` (see the [WebSocket A
 |---|---|
 | The panel accepted the command | Succeeds |
 | The panel rejected an arm command with response code 1 (partition not ready to arm, for example a zone is open) | Fails: "Partition not ready to arm (zone open)" |
-| Any other rejection (for example a wrong code) or NeoHub error | Fails: "NeoHub command failed: ..." with NeoHub's message |
+| Any other rejection (for example a wrong code), a refusal by the panel interface (a NACK, for example because it is busy) or a NeoHub error | Fails: "NeoHub command failed: ..." with NeoHub's message, for example "Command refused by the panel interface (NACK: SystemBusy)" |
 | No result within 10 seconds, or the connection to NeoHub drops while waiting | Fails: "NeoHub command failed: No confirmation from NeoHub within 10 s; check the alarm state" (or "Connection to NeoHub lost before the command was confirmed; ..."). The panel may still have carried out the command, so check the partition state. |
 
 **Behaviour change in 1.2.0:** before 1.2.0, these actions always succeeded and a rejection only showed up in the log. Now a rejected or unconfirmed arm or disarm raises an error, so a script or automation step that arms or disarms stops there and the following steps do not run. If the automation should carry on anyway, set `continue_on_error: true` on that step:
@@ -95,16 +95,27 @@ actions:
       message: "Arm command sent"
 ```
 
+This only matters for scripts and automations that arm or disarm themselves and should carry on afterwards. An automation that only reacts to an arm action (for example one triggered by the `call_service` event that waits for the armed state and reports when it does not come) keeps working unchanged, and the person who pressed the button now also sees the error right away.
+
 With an older NeoHub that does not list `command_result`, nothing changes: the actions return as soon as the command is sent and never fail because of the panel's answer.
+
+**Also new in 1.2.0:** the alarm panel entity has a `ready` attribute (see [Ready to arm](#ready-to-arm)). Each change of the flag, for example a door opened or closed while the partition is disarmed, changes the entity's attributes and so fires a state trigger on the alarm panel entity that has no `to:` or `from:`. To react to state changes only, set `to: null` (or explicit `to:` / `from:` states):
+
+```yaml
+triggers:
+  - trigger: state
+    entity_id: alarm_control_panel.example
+    to: null
+```
 
 ## Ready to arm
 
-A newer NeoHub (one that lists `partition_ready` in its `capabilities`) sends the panel's "ready" flag as `ready` for each partition. The partition is ready to arm when nothing prevents arming, typically when all of its zones are closed. The integration then adds:
+A newer NeoHub (one that lists `partition_ready` in its `capabilities`) sends the panel's "ready" flag as `ready` for each partition. The partition is ready to arm when it is disarmed and nothing prevents arming, typically when all of its zones are closed. NeoHub sends `false` while the partition is not disarmed (armed, exit or entry delay, alarm). The integration then adds:
 
-- a binary sensor per partition, named "*partition* ready to arm" (on = ready, off = not ready), on the same device as the alarm panel entity;
+- a binary sensor per partition that has an alarm panel entity, named "*partition* ready to arm" (on = ready, off = not ready), on the same device as the alarm panel entity. If that partition's alarm panel entity is disabled, the sensor is added disabled too;
 - a `ready` attribute (`true` / `false`) on the alarm panel entity.
 
-With an older NeoHub there is no sensor and no attribute. If NeoHub is updated while Home Assistant runs, the sensors appear when the integration reconnects. If NeoHub stops reporting the flag, the attribute disappears and the sensor shows Unknown.
+With an older NeoHub there is no sensor and no attribute. If NeoHub is updated while Home Assistant runs, the sensors appear when the integration reconnects. If NeoHub stops reporting the flag while Home Assistant runs, the attribute disappears and the sensor shows Unknown. After a Home Assistant restart or a reload of the integration with an older NeoHub, the sensor is no longer provided: it shows as unavailable and can be deleted.
 
 ## Entity Model
 
@@ -263,13 +274,13 @@ Sent in response to `get_full_state`. Contains the complete hierarchy.
           "partition_number": 1,
           "name": "Main",
           "status": "armed_away",
-          "ready": true
+          "ready": false
         },
         {
           "partition_number": 2,
           "name": "Garage",
           "status": "disarmed",
-          "ready": false
+          "ready": true
         }
       ],
       "zones": [
@@ -294,7 +305,7 @@ Sent in response to `get_full_state`. Contains the complete hierarchy.
 }
 ```
 
-**`capabilities`** (newer NeoHub only): `command_result` means NeoHub answers commands that carry a `request_id` with a `command_result`; `partition_ready` means each partition has **`ready`** (`true` when the partition is ready to arm). An older NeoHub sends neither `capabilities` nor `ready`. The integration reads `capabilities` again from every `full_state` and forgets them when the connection drops.
+**`capabilities`** (newer NeoHub only): `command_result` means NeoHub answers commands that carry a `request_id` with a `command_result`; `partition_ready` means each partition has **`ready`** (`true` when the partition is disarmed and ready to arm, `false` otherwise). An older NeoHub sends neither `capabilities` nor `ready`. The integration reads `capabilities` again from every `full_state` and forgets them when the connection drops.
 
 **`status`** values: `disarmed`, `armed_away`, `armed_home`, `armed_night`, `arming`, `pending`, `triggered` (`unknown` until NeoHub has read the partition's status)
 
@@ -343,7 +354,7 @@ Sent only to the connection that sent the command, once per command that carried
 
 - On success `code` and `message` are `null`.
 - When the panel rejects the command, `code` is the panel's numeric response code. For an arm command, `1` means the partition is not ready to arm (for example a zone is open).
-- When the command fails before or around the panel (session not found, no access code, timeout), `code` is `null` and `message` describes the failure. NeoHub waits up to 8 seconds for the panel; after that it reports "No confirmation from the panel within 8 s; check the partition state" (the panel may still have acted).
+- When the command fails before or around the panel (session not found, no access code, timeout, or the panel interface refused it with a NACK), `code` is `null` and `message` describes the failure. NeoHub waits up to 8 seconds for the panel; after that it reports "No confirmation from the panel within 8 s; check the partition state" (the panel may still have acted).
 
 #### `error`
 

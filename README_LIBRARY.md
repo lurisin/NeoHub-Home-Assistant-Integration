@@ -128,7 +128,7 @@ If the last `full_state` of the current connection lists `"command_result"` in `
 
 - Success: the method returns.
 - Failure reported by NeoHub: it raises `NeoHubCommandError`. `code` is the panel's numeric response code when the panel rejected the command (for an arm command, `1` means the partition is not ready to arm, for example because a zone is open), otherwise `None`. `message` is NeoHub's description.
-- No result within the timeout, or the connection drops while waiting: it raises `NeoHubCommandUnconfirmedError` (a subclass of `NeoHubCommandError`, `code` is `None`). The panel may still have carried out the command.
+- No result within the timeout, the connection drops while waiting, or the command could not be sent: it raises `NeoHubCommandUnconfirmedError` (a subclass of `NeoHubCommandError`, `code` is `None`). The panel may still have carried out the command.
 
 With an older NeoHub that lists no capabilities, commands are sent exactly as before (no `request_id`), the method returns as soon as the command is sent, and a failure only shows up as an `error` message. The `capabilities` property returns the capabilities of the current connection; it is empty while disconnected.
 
