@@ -341,6 +341,12 @@ class NeoHubClient:
                 ) from None
         finally:
             self._pending.pop(request_id, None)
+            # If the connection-drop cleanup failed the future while the
+            # send was still running and the send then raised, nobody
+            # awaits the future: mark its exception as retrieved so asyncio
+            # does not log "Future exception was never retrieved".
+            if future.done() and not future.cancelled():
+                future.exception()
 
         if result.get("success") is True:
             _LOGGER.debug("NeoHub confirmed %s", command_type)
