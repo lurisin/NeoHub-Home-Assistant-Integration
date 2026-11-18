@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -15,6 +16,14 @@ _LOGGER = logging.getLogger(__name__)
 RECONNECT_INTERVAL = 10
 MAX_RECONNECT_INTERVAL = 300
 
+# Seconds to wait for the command_result of a command. NeoHub itself gives
+# up waiting for the panel after 8 seconds and then reports a failure.
+COMMAND_RESULT_TIMEOUT = 10
+
+# Capability listed in full_state by a NeoHub that answers commands that
+# carry a request_id with a command_result message.
+CAPABILITY_COMMAND_RESULT = "command_result"
+
 
 class NeoHubError(Exception):
     """Base exception for NeoHub client."""
@@ -22,6 +31,27 @@ class NeoHubError(Exception):
 
 class NeoHubConnectionError(NeoHubError):
     """Connection error."""
+
+
+class NeoHubCommandError(NeoHubError):
+    """NeoHub reported that a command failed.
+
+    ``code`` is the panel's numeric response code when the panel rejected
+    the command, otherwise ``None``. ``message`` is NeoHub's description.
+    """
+
+    def __init__(self, message: str, code: int | None = None) -> None:
+        """Initialize the error."""
+        super().__init__(message)
+        self.message = message
+        self.code = code
+
+
+class NeoHubCommandUnconfirmedError(NeoHubCommandError):
+    """No command_result arrived (timeout or connection lost).
+
+    The panel may still have carried out the command.
+    """
 
 
 class NeoHubClient:
@@ -55,6 +85,10 @@ class NeoHubClient:
         self._listen_task: asyncio.Task | None = None
         self._reconnect_task: asyncio.Task | None = None
         self._shutdown = False
+        # Capabilities from the last full_state of the current connection.
+        self._capabilities: frozenset[str] = frozenset()
+        # Commands waiting for their command_result, keyed by request_id.
+        self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         
         # Callbacks
         self._on_connect: list[Callable[[], None]] = []
@@ -73,6 +107,15 @@ class NeoHubClient:
     def state(self) -> dict[str, Any]:
         """Return the current state dictionary keyed by session_id."""
         return self._state
+
+    @property
+    def capabilities(self) -> frozenset[str]:
+        """Return the capabilities NeoHub listed in the last full_state.
+
+        Empty while disconnected and for NeoHub versions that do not list
+        any capabilities.
+        """
+        return self._capabilities
 
     @property
     def ws_url(self) -> str:
@@ -208,6 +251,8 @@ class NeoHubClient:
         """Clean up the WebSocket and HTTP session."""
         was_connected = self._connected
         self._connected = False
+        self._capabilities = frozenset()
+        self._fail_pending_commands()
 
         if self._ws is not None and not self._ws.closed:
             await self._ws.close()
@@ -230,6 +275,103 @@ class NeoHubClient:
             await self._ws.send_json(data)
         else:
             _LOGGER.warning("Cannot send message, WebSocket not connected")
+
+    async def _send_command(
+        self,
+        command_type: str,
+        session_id: str,
+        partition_number: int,
+        code: str | None,
+    ) -> None:
+        """Send a partition command and wait for its result if NeoHub reports one.
+
+        If the last full_state of this connection listed the
+        "command_result" capability, the command carries a request_id and
+        this waits up to COMMAND_RESULT_TIMEOUT seconds for the matching
+        command_result. It raises NeoHubCommandError if NeoHub reports a
+        failure, and NeoHubCommandUnconfirmedError if no result arrives
+        (timeout, connection lost, or the command could not be sent).
+
+        Otherwise (older NeoHub, or not connected) the command is sent as
+        before, without a request_id, and nothing is awaited or raised: a
+        failure only shows up as an "error" message from NeoHub.
+        """
+        message: dict[str, Any] = {
+            "type": command_type,
+            "session_id": session_id,
+            "partition_number": partition_number,
+            "code": code,
+        }
+
+        if CAPABILITY_COMMAND_RESULT not in self._capabilities:
+            await self._send(message)
+            _LOGGER.debug(
+                "NeoHub does not report command results; %s sent without "
+                "waiting for confirmation",
+                command_type,
+            )
+            return
+
+        request_id = uuid.uuid4().hex
+        message["request_id"] = request_id
+        future: asyncio.Future[dict[str, Any]] = (
+            asyncio.get_running_loop().create_future()
+        )
+        # Register before sending: the result can arrive while send_json
+        # is still being awaited.
+        self._pending[request_id] = future
+        try:
+            ws = self._ws
+            if ws is None or ws.closed:
+                raise NeoHubCommandUnconfirmedError(
+                    "Not connected to NeoHub; the command was not sent"
+                )
+            try:
+                await ws.send_json(message)
+            except (aiohttp.ClientError, ConnectionError) as err:
+                raise NeoHubCommandUnconfirmedError(
+                    f"Could not send the command to NeoHub: {err}"
+                ) from err
+            try:
+                result = await asyncio.wait_for(future, COMMAND_RESULT_TIMEOUT)
+            except TimeoutError:
+                raise NeoHubCommandUnconfirmedError(
+                    f"No confirmation from NeoHub within "
+                    f"{COMMAND_RESULT_TIMEOUT} s; check the alarm state"
+                ) from None
+        finally:
+            self._pending.pop(request_id, None)
+
+        if result.get("success") is True:
+            _LOGGER.debug("NeoHub confirmed %s", command_type)
+            return
+
+        code_value = result.get("code")
+        result_code = (
+            code_value
+            if isinstance(code_value, int) and not isinstance(code_value, bool)
+            else None
+        )
+        text = result.get("message")
+        if not isinstance(text, str) or not text:
+            text = (
+                f"The panel rejected the command (response code {result_code})"
+                if result_code is not None
+                else "NeoHub reported that the command failed"
+            )
+        raise NeoHubCommandError(text, result_code)
+
+    def _fail_pending_commands(self) -> None:
+        """Fail every command still waiting for its command_result."""
+        pending, self._pending = self._pending, {}
+        for future in pending.values():
+            if not future.done():
+                future.set_exception(
+                    NeoHubCommandUnconfirmedError(
+                        "Connection to NeoHub lost before the command was "
+                        "confirmed; check the alarm state"
+                    )
+                )
 
     async def _listen(self) -> None:
         """Listen for incoming WebSocket messages."""
@@ -296,6 +438,8 @@ class NeoHubClient:
             self._handle_partition_update(data)
         elif msg_type == "zone_update":
             self._handle_zone_update(data)
+        elif msg_type == "command_result":
+            self._handle_command_result(data)
         elif msg_type == "error":
             error_msg = data.get("message", "Unknown error")
             _LOGGER.error("NeoHub server error: %s", error_msg)
@@ -316,6 +460,14 @@ class NeoHubClient:
                 _LOGGER.error("Session missing session_id: %s", session)
                 continue
             self._state[session_id] = session
+
+        capabilities = data.get("capabilities")
+        self._capabilities = (
+            frozenset(c for c in capabilities if isinstance(c, str))
+            if isinstance(capabilities, list)
+            else frozenset()
+        )
+        _LOGGER.debug("NeoHub capabilities: %s", sorted(self._capabilities))
 
         _LOGGER.info(
             "Received full state: %d session(s), %d partition(s), %d zone(s)",
@@ -384,82 +536,63 @@ class NeoHubClient:
             except Exception:
                 _LOGGER.exception("Error in zone_update callback")
 
+    def _handle_command_result(self, data: dict[str, Any]) -> None:
+        """Process a command_result message."""
+        request_id = data.get("request_id")
+        future = (
+            self._pending.get(request_id) if isinstance(request_id, str) else None
+        )
+        if future is None or future.done():
+            # Late answer after a timeout, or a result for another client.
+            _LOGGER.debug(
+                "Ignoring command_result for unknown request_id %s", request_id
+            )
+            return
+        future.set_result(data)
+
     # ── Commands ────────────────────────────────────────────────────────
+    #
+    # With a NeoHub that lists the "command_result" capability, each command
+    # waits for the result and raises NeoHubCommandError on failure (see
+    # _send_command). With an older NeoHub it returns as soon as the command
+    # is sent.
 
     async def arm_away(
         self, session_id: str, partition_number: int, code: str | None = None
     ) -> None:
         """Send an arm-away command."""
-        await self._send(
-            {
-                "type": "arm_away",
-                "session_id": session_id,
-                "partition_number": partition_number,
-                "code": code,
-            }
-        )
+        await self._send_command("arm_away", session_id, partition_number, code)
 
     async def arm_home(
         self, session_id: str, partition_number: int, code: str | None = None
     ) -> None:
         """Send an arm-home (stay) command."""
-        await self._send(
-            {
-                "type": "arm_home",
-                "session_id": session_id,
-                "partition_number": partition_number,
-                "code": code,
-            }
-        )
+        await self._send_command("arm_home", session_id, partition_number, code)
 
     async def arm_night(
         self, session_id: str, partition_number: int, code: str | None = None
     ) -> None:
         """Send an arm-night command."""
-        await self._send(
-            {
-                "type": "arm_night",
-                "session_id": session_id,
-                "partition_number": partition_number,
-                "code": code,
-            }
-        )
+        await self._send_command("arm_night", session_id, partition_number, code)
 
     async def disarm(
         self, session_id: str, partition_number: int, code: str | None = None
     ) -> None:
         """Send a disarm command."""
-        await self._send(
-            {
-                "type": "disarm",
-                "session_id": session_id,
-                "partition_number": partition_number,
-                "code": code,
-            }
-        )
+        await self._send_command("disarm", session_id, partition_number, code)
 
     async def arm_home_instant(
         self, session_id: str, partition_number: int, code: str | None = None
     ) -> None:
         """Send an arm-home (stay) command with no entry delay (Stay Instant)."""
-        await self._send(
-            {
-                "type": "arm_home_instant",
-                "session_id": session_id,
-                "partition_number": partition_number,
-                "code": code,
-            }
+        await self._send_command(
+            "arm_home_instant", session_id, partition_number, code
         )
 
     async def arm_away_instant(
         self, session_id: str, partition_number: int, code: str | None = None
     ) -> None:
         """Send an arm-away command with no entry delay (Away Instant)."""
-        await self._send(
-            {
-                "type": "arm_away_instant",
-                "session_id": session_id,
-                "partition_number": partition_number,
-                "code": code,
-            }
+        await self._send_command(
+            "arm_away_instant", session_id, partition_number, code
         )

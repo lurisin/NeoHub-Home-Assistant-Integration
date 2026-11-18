@@ -91,6 +91,7 @@ NeoHubClient(
 
 - `connected: bool` - Connection status
 - `state: dict[str, Any]` - Current state keyed by session_id
+- `capabilities: frozenset[str]` - Capabilities NeoHub listed in the last `full_state` of the current connection (empty while disconnected or with an older NeoHub)
 
 #### Methods
 
@@ -120,6 +121,16 @@ All registration methods return an unregister function.
 - `async disarm(session_id: str, partition_number: int, code: str | None = None)`
 
 The `*_instant` commands need a NeoHub build that supports the `arm_home_instant` / `arm_away_instant` messages; older builds reply with an `error` message.
+
+##### Command results
+
+If the last `full_state` of the current connection lists `"command_result"` in `capabilities`, every command carries a `request_id` and waits up to 10 seconds (`COMMAND_RESULT_TIMEOUT`) for NeoHub's matching `command_result`:
+
+- Success: the method returns.
+- Failure reported by NeoHub: it raises `NeoHubCommandError`. `code` is the panel's numeric response code when the panel rejected the command (for an arm command, `1` means the partition is not ready to arm, for example because a zone is open), otherwise `None`. `message` is NeoHub's description.
+- No result within the timeout, or the connection drops while waiting: it raises `NeoHubCommandUnconfirmedError` (a subclass of `NeoHubCommandError`, `code` is `None`). The panel may still have carried out the command.
+
+With an older NeoHub that lists no capabilities, commands are sent exactly as before (no `request_id`), the method returns as soon as the command is sent, and a failure only shows up as an `error` message. The `capabilities` property returns the capabilities of the current connection; it is empty while disconnected.
 
 ## License
 
