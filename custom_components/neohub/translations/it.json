@@ -1,0 +1,67 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connessione a NeoHub",
+        "description": "Configura la connessione a NeoHub per integrare le centrali d'allarme DSC Neo.",
+        "data": {
+          "host": "Host",
+          "port": "Porta",
+          "ssl": "Usa SSL",
+          "access_token": "Token di accesso"
+        }
+      },
+      "hassio_confirm": {
+        "title": "NeoHub rilevato",
+        "description": "L'app NeoHub è stata rilevata su {host}:{port}. Vuoi configurarla?"
+      }
+    },
+    "error": {
+      "cannot_connect": "Impossibile connettersi a NeoHub. Controlla host e porta."
+    },
+    "abort": {
+      "already_configured": "Questo NeoHub è già configurato."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "ready_to_arm": {
+        "name": "{partition} pronta all'inserimento",
+        "state": {
+          "off": "Non pronta",
+          "on": "Pronta"
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "Comando NeoHub non riuscito: {message}"
+    },
+    "not_ready_to_arm": {
+      "message": "Partizione non pronta all'inserimento (zona aperta)"
+    }
+  },
+  "services": {
+    "arm_home_instant": {
+      "name": "Inserisci in casa (istantaneo)",
+      "description": "Inserisce la partizione in modalità In casa (Stay) senza ritardo di ingresso (Stay Instant). La partizione viene mostrata come Attivo in casa.",
+      "fields": {
+        "code": {
+          "name": "Codice",
+          "description": "Codice di accesso. Lascia vuoto per usare il codice predefinito dell'entità, se impostato in Home Assistant, altrimenti il codice di accesso predefinito di NeoHub."
+        }
+      }
+    },
+    "arm_away_instant": {
+      "name": "Inserisci fuori casa (istantaneo)",
+      "description": "Inserisce la partizione in modalità Fuori casa (Away) senza ritardo di ingresso (Away Instant). La partizione viene mostrata come Attivo fuori casa.",
+      "fields": {
+        "code": {
+          "name": "Codice",
+          "description": "Codice di accesso. Lascia vuoto per usare il codice predefinito dell'entità, se impostato in Home Assistant, altrimenti il codice di accesso predefinito di NeoHub."
+        }
+      }
+    }
+  }
+}
