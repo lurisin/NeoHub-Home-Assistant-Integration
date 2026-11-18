@@ -24,7 +24,6 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
-    ATTR_READY,
     DOMAIN,
     PANEL_RESPONSE_NOT_READY,
     SIGNAL_CONNECTION_STATE,
@@ -136,16 +135,6 @@ class DscAlarmPanel(AlarmControlPanelEntity):
     def available(self) -> bool:
         """Return True if the entity is available."""
         return self._coordinator.connected
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Return whether the partition is ready to arm, if NeoHub reports it."""
-        ready = self._coordinator.partition_ready(
-            self._session_id, self._partition_number
-        )
-        if ready is None:
-            return None
-        return {ATTR_READY: ready}
 
     async def async_added_to_hass(self) -> None:
         """Register dispatch listeners when added to hass."""

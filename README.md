@@ -16,7 +16,7 @@ This integration uses the [`pyneohub`](https://github.com/BrianHumlicek/NeoHub-H
 - **Alarm Control Panel** entities for each partition (arm away, arm home, arm night, disarm)
 - **Instant arming services** `neohub.arm_home_instant` and `neohub.arm_away_instant` (arm with no entry delay; optional `code`, see [Services](#services)). The partition still shows as Armed Home / Armed Away.
 - **Binary Sensor** entities for each zone (door, window, motion, smoke, etc.)
-- **Ready to arm**: a binary sensor per partition and a `ready` attribute on the alarm panel entity (needs a NeoHub that reports it, see [Ready to arm](#ready-to-arm))
+- **Ready to arm**: a binary sensor per partition (needs a NeoHub that reports it, see [Ready to arm](#ready-to-arm))
 - **Command results**: with a NeoHub that reports them, an arm or disarm action that the panel rejects (for example because a zone is open) or that NeoHub does not confirm fails with an error instead of passing silently (see [Errors](#errors))
 - English and Italian translations
 - Real-time push updates via WebSocket — no polling
@@ -99,23 +99,11 @@ This only matters for scripts and automations that arm or disarm themselves and 
 
 With an older NeoHub that does not list `command_result`, nothing changes: the actions return as soon as the command is sent and never fail because of the panel's answer.
 
-**Also new in 1.2.0:** the alarm panel entity has a `ready` attribute (see [Ready to arm](#ready-to-arm)). Each change of the flag, for example a door opened or closed while the partition is disarmed, changes the entity's attributes and so fires a state trigger on the alarm panel entity that has no `to:` or `from:`. To react to state changes only, set `to: null` (or explicit `to:` / `from:` states):
-
-```yaml
-triggers:
-  - trigger: state
-    entity_id: alarm_control_panel.example
-    to: null
-```
-
 ## Ready to arm
 
-A newer NeoHub (one that lists `partition_ready` in its `capabilities`) sends the panel's "ready" flag as `ready` for each partition. The partition is ready to arm when it is disarmed and nothing prevents arming, typically when all of its zones are closed. NeoHub sends `false` while the partition is not disarmed (armed, exit or entry delay, alarm). The integration then adds:
+A newer NeoHub (one that lists `partition_ready` in its `capabilities`) sends the panel's "ready" flag as `ready` for each partition. The partition is ready to arm when it is disarmed and nothing prevents arming, typically when all of its zones are closed. NeoHub sends `false` while the partition is not disarmed (armed, exit or entry delay, alarm). The integration then adds a binary sensor per partition that has an alarm panel entity, named "*partition* ready to arm" (on = ready, off = not ready), on the same device as the alarm panel entity. If that partition's alarm panel entity is disabled, the sensor is added disabled too.
 
-- a binary sensor per partition that has an alarm panel entity, named "*partition* ready to arm" (on = ready, off = not ready), on the same device as the alarm panel entity. If that partition's alarm panel entity is disabled, the sensor is added disabled too;
-- a `ready` attribute (`true` / `false`) on the alarm panel entity.
-
-With an older NeoHub there is no sensor and no attribute. If NeoHub is updated while Home Assistant runs, the sensors appear when the integration reconnects. If NeoHub stops reporting the flag while Home Assistant runs, the attribute disappears and the sensor shows Unknown. After a Home Assistant restart or a reload of the integration with an older NeoHub, the sensor is no longer provided: it shows as unavailable and can be deleted.
+With an older NeoHub there is no sensor. If NeoHub is updated while Home Assistant runs, the sensors appear when the integration reconnects. If NeoHub stops reporting the flag while Home Assistant runs, the sensor shows Unknown. After a Home Assistant restart or a reload of the integration with an older NeoHub, the sensor is no longer provided: it shows as unavailable and can be deleted.
 
 ## Entity Model
 
@@ -141,8 +129,6 @@ Zones are session-level entities that can be associated with one or more partiti
 | `triggered`    | Triggered       |
 
 `arming` means the exit delay is running and `pending` means the entry delay is running. Before NeoHub has read a partition's status it reports `unknown`, which shows as Unknown in Home Assistant.
-
-The alarm panel entity also has a `ready` attribute when NeoHub reports it (see [Ready to arm](#ready-to-arm)).
 
 ---
 
