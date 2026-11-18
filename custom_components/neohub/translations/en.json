@@ -23,6 +23,17 @@
       "already_configured": "This NeoHub is already configured."
     }
   },
+  "entity": {
+    "binary_sensor": {
+      "ready_to_arm": {
+        "name": "{partition} ready to arm",
+        "state": {
+          "off": "Not ready",
+          "on": "Ready"
+        }
+      }
+    }
+  },
   "exceptions": {
     "command_failed": {
       "message": "NeoHub command failed: {message}"

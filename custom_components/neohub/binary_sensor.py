@@ -40,7 +40,7 @@ async def async_setup_entry(
     """Set up DSC Neo binary sensor entities."""
     coordinator: NeoHubCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities: list[DscZoneSensor] = []
+    entities: list[BinarySensorEntity] = []
     for session_id, session in coordinator.state.items():
         session_name = session.get("name", f"DSC Neo {session_id}")
         for zone in session.get("zones", []):
@@ -60,7 +60,62 @@ async def async_setup_entry(
                 )
             )
 
+    # A "ready to arm" sensor for every partition whose state includes
+    # "ready". An older NeoHub does not send it, so there is none. If NeoHub
+    # is updated while Home Assistant runs, the sensors are added when the
+    # first full_state with "ready" arrives. They are named after the
+    # partition names in the state used now, at setup (the same names the
+    # alarm panel entities get), not after a full_state that NeoHub may send
+    # before it has read the panel's labels.
+    ready_sensors: set[tuple[str, int]] = set()
+    setup_names: dict[tuple[str, int], str] = {
+        (session_id, partition["partition_number"]): partition.get(
+            "name", f"Partition {partition['partition_number']}"
+        )
+        for session_id, session in coordinator.state.items()
+        for partition in session.get("partitions", [])
+        if partition.get("partition_number") is not None
+    }
+
+    @callback
+    def _new_ready_sensors() -> list[BinarySensorEntity]:
+        new: list[BinarySensorEntity] = []
+        for session_id, session in coordinator.state.items():
+            session_name = session.get("name", f"DSC Neo {session_id}")
+            for partition in session.get("partitions", []):
+                partition_number = partition.get("partition_number")
+                if (
+                    partition_number is None
+                    or "ready" not in partition
+                    or (session_id, partition_number) in ready_sensors
+                ):
+                    continue
+                ready_sensors.add((session_id, partition_number))
+                new.append(
+                    DscPartitionReadySensor(
+                        coordinator=coordinator,
+                        session_id=session_id,
+                        session_name=session_name,
+                        partition_number=partition_number,
+                        partition_name=setup_names.get(
+                            (session_id, partition_number),
+                            partition.get("name", f"Partition {partition_number}"),
+                        ),
+                    )
+                )
+        return new
+
+    entities.extend(_new_ready_sensors())
     async_add_entities(entities)
+
+    @callback
+    def _handle_full_state(_data: dict[str, Any]) -> None:
+        if new := _new_ready_sensors():
+            async_add_entities(new)
+
+    entry.async_on_unload(
+        coordinator.client.register_full_state_callback(_handle_full_state)
+    )
 
 
 class DscZoneSensor(BinarySensorEntity):
@@ -136,6 +191,73 @@ class DscZoneSensor(BinarySensorEntity):
             self._bypassed = data["bypassed"]
         if "partitions" in data:
             self._partition_list = data["partitions"]
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_connection_state(self, connected: bool) -> None:
+        """Handle a connection state change."""
+        self.async_write_ha_state()
+
+
+class DscPartitionReadySensor(BinarySensorEntity):
+    """Whether a DSC Neo partition is ready to arm (as reported by NeoHub)."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "ready_to_arm"
+
+    def __init__(
+        self,
+        coordinator: NeoHubCoordinator,
+        session_id: str,
+        session_name: str,
+        partition_number: int,
+        partition_name: str,
+    ) -> None:
+        """Initialize the binary sensor entity."""
+        self._coordinator = coordinator
+        self._session_id = session_id
+        self._partition_number = partition_number
+        self._attr_unique_id = f"{session_id}_partition_{partition_number}_ready"
+        self._attr_translation_placeholders = {"partition": partition_name}
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, session_id)},
+            name=session_name,
+            manufacturer="DSC",
+            model="Neo",
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True if the partition is ready to arm."""
+        return self._coordinator.partition_ready(
+            self._session_id, self._partition_number
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return True if the entity is available."""
+        return self._coordinator.connected
+
+    async def async_added_to_hass(self) -> None:
+        """Register dispatch listeners when added to hass."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                f"{SIGNAL_STATE_UPDATED}_partition_{self._session_id}_{self._partition_number}",
+                self._handle_update,
+            )
+        )
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                SIGNAL_CONNECTION_STATE,
+                self._handle_connection_state,
+            )
+        )
+
+    @callback
+    def _handle_update(self, data: dict[str, Any]) -> None:
+        """Handle a partition state update (full_state or partition_update)."""
         self.async_write_ha_state()
 
     @callback

@@ -54,6 +54,21 @@ class NeoHubCoordinator:
         """Return the current state."""
         return self._client.state
 
+    def partition_ready(self, session_id: str, partition_number: int) -> bool | None:
+        """Return whether a partition is ready to arm.
+
+        None if NeoHub does not report it (older NeoHub) or the partition
+        is unknown.
+        """
+        session = self.state.get(session_id)
+        if session is None:
+            return None
+        for partition in session.get("partitions", []):
+            if partition.get("partition_number") == partition_number:
+                ready = partition.get("ready")
+                return ready if isinstance(ready, bool) else None
+        return None
+
     def async_setup(self) -> None:
         """Register callbacks with the client (idempotent)."""
         if not self._unregister_callbacks:

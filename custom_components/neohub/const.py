@@ -11,6 +11,10 @@ DEFAULT_SSL = False
 SIGNAL_STATE_UPDATED = f"{DOMAIN}_state_updated"
 SIGNAL_CONNECTION_STATE = f"{DOMAIN}_connection_state"
 
+# State attribute of the alarm control panel entity: whether the partition
+# is ready to arm. Only set when NeoHub reports it.
+ATTR_READY = "ready"
+
 # Panel response code that NeoHub reports when an arm command is rejected
 # because the partition is not ready to arm (for example a zone is open).
 PANEL_RESPONSE_NOT_READY = 1

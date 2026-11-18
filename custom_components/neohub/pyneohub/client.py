@@ -499,6 +499,8 @@ class NeoHubClient:
                 if partition["partition_number"] == partition_number:
                     if "status" in data:
                         partition["status"] = data["status"]
+                    if "ready" in data:
+                        partition["ready"] = data["ready"]
                     break
 
         for callback in self._on_partition_update:
