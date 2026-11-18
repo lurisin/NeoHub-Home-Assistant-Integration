@@ -11,6 +11,7 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -60,14 +61,18 @@ async def async_setup_entry(
                 )
             )
 
-    # A "ready to arm" sensor for every partition whose state includes
-    # "ready". An older NeoHub does not send it, so there is none. If NeoHub
-    # is updated while Home Assistant runs, the sensors are added when the
-    # first full_state with "ready" arrives. They are named after the
-    # partition names in the state used now, at setup (the same names the
-    # alarm panel entities get), not after a full_state that NeoHub may send
-    # before it has read the panel's labels.
+    # A "ready to arm" sensor for every partition that gets an alarm panel
+    # entity at setup and whose state includes "ready". An older NeoHub does
+    # not send it, so there is none. If NeoHub is updated while Home
+    # Assistant runs, the sensors are added when the first full_state with
+    # "ready" arrives. They are named after the partition names in the state
+    # used now, at setup (the same names the alarm panel entities get), not
+    # after a full_state that NeoHub may send before it has read the panel's
+    # labels. A partition that first appears later gets neither entity until
+    # the entry is reloaded. If the partition's alarm panel entity is
+    # disabled, its ready sensor is added disabled too.
     ready_sensors: set[tuple[str, int]] = set()
+    registry = er.async_get(hass)
     setup_names: dict[tuple[str, int], str] = {
         (session_id, partition["partition_number"]): partition.get(
             "name", f"Partition {partition['partition_number']}"
@@ -83,24 +88,29 @@ async def async_setup_entry(
         for session_id, session in coordinator.state.items():
             session_name = session.get("name", f"DSC Neo {session_id}")
             for partition in session.get("partitions", []):
-                partition_number = partition.get("partition_number")
+                key = (session_id, partition.get("partition_number"))
                 if (
-                    partition_number is None
+                    key not in setup_names
                     or "ready" not in partition
-                    or (session_id, partition_number) in ready_sensors
+                    or key in ready_sensors
                 ):
                     continue
-                ready_sensors.add((session_id, partition_number))
+                ready_sensors.add(key)
+                alarm_entity_id = registry.async_get_entity_id(
+                    "alarm_control_panel", DOMAIN, f"{key[0]}_partition_{key[1]}"
+                )
+                alarm_entry = (
+                    registry.async_get(alarm_entity_id) if alarm_entity_id else None
+                )
                 new.append(
                     DscPartitionReadySensor(
                         coordinator=coordinator,
                         session_id=session_id,
                         session_name=session_name,
-                        partition_number=partition_number,
-                        partition_name=setup_names.get(
-                            (session_id, partition_number),
-                            partition.get("name", f"Partition {partition_number}"),
-                        ),
+                        partition_number=key[1],
+                        partition_name=setup_names[key],
+                        enabled_default=alarm_entry is None
+                        or not alarm_entry.disabled,
                     )
                 )
         return new
@@ -212,12 +222,14 @@ class DscPartitionReadySensor(BinarySensorEntity):
         session_name: str,
         partition_number: int,
         partition_name: str,
+        enabled_default: bool = True,
     ) -> None:
         """Initialize the binary sensor entity."""
         self._coordinator = coordinator
         self._session_id = session_id
         self._partition_number = partition_number
         self._attr_unique_id = f"{session_id}_partition_{partition_number}_ready"
+        self._attr_entity_registry_enabled_default = enabled_default
         self._attr_translation_placeholders = {"partition": partition_name}
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, session_id)},
