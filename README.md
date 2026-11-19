@@ -77,7 +77,7 @@ A NeoHub that lists `command_result` in its `capabilities` (see the [WebSocket A
 | Outcome | Result of the action |
 |---|---|
 | The panel accepted the command | Succeeds |
-| The panel rejected an arm command with response code 1 (partition not ready to arm, for example a zone is open) | Fails: "Partition not ready to arm (zone open)" |
+| The panel rejected an arm command with response code 1 (partition not ready to arm, for example because a zone is open; the panel's description of code 1 is generic and names no cause, so other causes are possible) | Fails: "Partition not ready to arm" |
 | Any other rejection (for example a wrong code), a refusal by the panel interface (a NACK, for example because it is busy) or a NeoHub error | Fails: "NeoHub command failed: ..." with NeoHub's message, for example "Command refused by the panel interface (NACK: SystemBusy)" |
 | No result within 10 seconds, or the connection to NeoHub drops while waiting | Fails: "NeoHub command failed: No confirmation from NeoHub within 10 s; check the alarm state" (or "Connection to NeoHub lost before the command was confirmed; ..."). The panel may still have carried out the command, so check the partition state. |
 
@@ -333,7 +333,7 @@ Sent only to the connection that sent the command, once per command that carried
   "request_id": "6f1c0e8d2b7a4b0f9c3e5a1d2f4b6c8e",
   "success": false,
   "code": 1,
-  "message": "Partition not ready to arm (zone open)"
+  "message": "Partition not ready to arm"
 }
 ```
 

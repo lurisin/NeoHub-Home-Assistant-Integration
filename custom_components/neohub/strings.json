@@ -39,7 +39,7 @@
       "message": "NeoHub command failed: {message}"
     },
     "not_ready_to_arm": {
-      "message": "Partition not ready to arm (zone open)"
+      "message": "Partition not ready to arm"
     }
   },
   "services": {
