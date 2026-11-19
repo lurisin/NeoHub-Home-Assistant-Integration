@@ -136,6 +136,7 @@ Commits to cherry-pick, in this order:
    out, together with commit 4)
 10. `Drop the ready attribute from the alarm panel entity`
 11. `Remove the Italian translation` (leave out, together with commits 4 and 9)
+12. `Use the neutral text "Partition not ready to arm" for code 1`
 
 Commits 6-10 came out of review. Commit 10 removes the alarm panel entity's
 `ready` attribute that commit 3 added and commits 5 and 8 documented, so the
@@ -143,6 +144,14 @@ ready flag is only on the binary sensor; the subjects of commits 3 and 8 still
 name the attribute. Leave out `Bump version to 1.2.0` and `Bump version to 1.2.1` (fork only),
 commits 4, 9 and 11 (the fork's code is English only) and the
 `UPSTREAM_PRS.md` commits.
+
+Commit 12 came later: the panel's description of response code 1 is generic
+and names no cause, so the text no longer says "(zone open)". It goes together
+with the same text change in the NeoHub PR (section D of the NeoHub fork's
+`UPSTREAM_PRS.md`); only the text changes, not the mapping of code 1. Commit 5
+also adds the Features line "English and Italian translations", which commit
+11 removes again; when commit 11 is left out, drop that line from commit 5 on
+the PR branch.
 
 Dependencies:
 
@@ -176,7 +185,7 @@ Report command results and the partition ready state
 Today every arm and disarm action is fire-and-forget: if the panel rejects the command, for example because a zone is open, the action still succeeds and the only trace is `NeoHub server error: ...` in the log. With this PR and a NeoHub that reports command results:
 
 - The arm and disarm actions (`alarm_control_panel.alarm_arm_home` / `alarm_arm_away` / `alarm_arm_night` / `alarm_disarm`, `neohub.arm_home_instant` / `neohub.arm_away_instant`) wait up to 10 s for NeoHub's `command_result` and raise a `HomeAssistantError` when the command fails:
-  - an arm command rejected with panel response code 1: "Partition not ready to arm (zone open)" (translation key `not_ready_to_arm`);
+  - an arm command rejected with panel response code 1: "Partition not ready to arm" (translation key `not_ready_to_arm`);
   - any other failure: "NeoHub command failed: <NeoHub's message>" (translation key `command_failed`), including a refusal by the panel interface (NACK), no result within 10 s or a dropped connection ("No confirmation from NeoHub within 10 s; check the alarm state").
 - Each partition that has an alarm panel entity gets a binary sensor "<partition> ready to arm" (translation key `ready_to_arm`, unique_id `<session_id>_partition_<n>_ready`, on the panel device; added disabled when that partition's alarm panel entity is disabled). The alarm panel entity gets no new attribute, so state triggers on it do not fire when only the ready flag changes.
 
@@ -217,4 +226,81 @@ Existing unique_ids, entity names, supported features and the state mapping are 
 ## Not tested
 
 - On a real panel through NeoHub. Response code 1 for an arm attempt with a zone open was seen on a real PowerSeries Neo panel (Stay arm with no entry delay, door open: rejected with code 1 three times, accepted once the door was closed), but this PR's tests use a fake NeoHub for it. The ready flag was not observed on a panel.
+```
+
+---
+
+## PR D: Panel trouble sensor
+
+Commits to cherry-pick, in this order:
+
+1. `Store the partition trouble flag from NeoHub`
+2. `Add a trouble binary sensor per partition`
+3. `README: panel trouble sensor, troubles in the WebSocket API`
+
+Leave out `Bump version to 1.3.0` (fork only) and the `UPSTREAM_PRS.md`
+commits. `Use the neutral text "Partition not ready to arm" for code 1` belongs
+to PR C (commit 12), not to this PR.
+
+Dependencies:
+
+- **NeoHub:** this needs the NeoHub PR drafted as section E of the NeoHub fork's
+  `UPSTREAM_PRS.md` (the `partition_troubles` capability and `troubles` in
+  `full_state` and `partition_update`). Open it first and put its number in
+  place of `<NEOHUB_PR_E>`. Without it nothing breaks: the sensor is only
+  created when NeoHub lists `partition_troubles`.
+- **This repository:** the commits apply on top of PR C. In a scratch clone,
+  upstream `master` (`6ebc3e0`) plus PR A, PR B, the eight English-only commits
+  of PR C, PR C's commit 12 and these three commits applied without conflicts;
+  they also apply without commit 12. The resulting tree equals the fork's tree
+  except for the version number, this file and the Features line about the
+  Italian translation (see PR C). Submit this after PR C is merged and replace
+  `<PR_C>` below.
+
+### Title
+
+```
+Add a binary sensor for the panel trouble state
+```
+
+### Body
+
+```markdown
+**Depends on BrianHumlicek/NeoHub#<NEOHUB_PR_E>** (the `partition_troubles` capability and the partition `troubles` flag in NeoHub's WebSocket API). Applies on top of #<PR_C>.
+
+## Summary
+
+With a NeoHub that lists `partition_troubles` in `full_state.capabilities`, each partition that has an alarm panel entity gets a binary sensor "<partition> trouble":
+
+- translation key `trouble`, device class `problem` (on = the panel reports a trouble, for example AC power loss or a low battery), unique_id `<session_id>_partition_<n>_trouble`, on the same device as the alarm panel entity;
+- created at setup, or with the first `full_state` that lists the capability when NeoHub is updated while Home Assistant runs, named after the setup-time partition name; added disabled when that partition's alarm panel entity is disabled;
+- if NeoHub also sends `trouble_types` (a list of strings), the sensor shows it as the attribute `trouble_types`; NeoHub sends it only if it can read the trouble details, otherwise the sensor has no extra attribute.
+
+The alarm panel entity does not change: no new attribute, so a trouble change alone does not change its state object and does not fire state triggers on it. With an older NeoHub nothing changes and no sensor is added.
+
+This lets an automation tell "the panel reports a trouble" apart from "a zone is open" when an arm command is rejected as not ready.
+
+## Changes
+
+- `pyneohub/client.py`: `CAPABILITY_PARTITION_TROUBLES = "partition_troubles"`. `partition_update` also copies `troubles` and `trouble_types` into the client state when present; an update without them keeps the last value, as for `ready`.
+- `coordinator.py`: `partition_troubles()` (bool or None) and `partition_trouble_types()` (list or None), on a small shared lookup helper also used by `partition_ready()`.
+- `binary_sensor.py`: `DscPartitionTroubleSensor`, created by the same code path and the same single `full_state` callback as the ready sensor (same setup-time names, same rule for disabled alarm panel entities, no sensor for a partition that appears after setup). It reads `troubles` from the client state, so a `full_state` without it (NeoHub downgraded) makes it show unknown.
+- `strings.json` / `translations/en.json` (identical): `entity.binary_sensor.trouble` (name, and the `trouble_types` attribute name).
+- `README.md` / `README_LIBRARY.md`: a "Panel trouble" section, the entity model table, and `partition_troubles`, `troubles` and `trouble_types` in the WebSocket API section.
+
+Existing unique_ids, entity names, supported features, the state mapping and the command frames are unchanged. There is no version bump.
+
+## Testing
+
+- `python -m compileall custom_components/neohub` passes on Python 3.14 and 3.13. All modules import on Home Assistant 2026.11.2 and 2026.2.3.
+- hassfest from HA core 2026.11.2 and 2026.2.3: 0 invalid integrations; the only output is the existing "Config flows that are discoverable need to set a unique ID" warning.
+- A new functional test on a real `hass` instance (2026.11.2 and 2026.2.3) with the integration's real client and a fake NeoHub WebSocket server in three protocol generations (no capabilities; `command_result` + `partition_ready`; plus `partition_troubles`); only timing constants were shortened. It covers: the sensor's registry entry (unique_id, translation key, device class, device), name and states from `full_state`; `troubles` following `partition_update` frames, including troubles-only frames and frames without `status` and `ready`; an update without `troubles` keeping the last value; a non-bool value giving unknown; `trouble_types` shown on the trouble sensor only, updated, kept, and gone after a `full_state` without it; NeoHub downgraded while HA runs (unknown), a reload against an older NeoHub (unavailable, registry entry kept) and NeoHub upgraded again (sensor back); NeoHub updated while HA runs (sensors added with the setup-time names, and added disabled for a partition whose alarm panel entity was disabled); a partition that reports the capability but no `troubles` (unknown); one `full_state` callback per entry, unregistered on unload; no access code in any log record.
+- Troubles-only and `trouble_types`-only frames give 0 `state_changed` events on the alarm panel entity and 0 runs of a state trigger on it without `to:` / `from:` (and with `to: null`); a status change in the same test does fire both automations. With a test-only change that adds `troubles` as an alarm panel attribute, these checks fail, as they should. Against the previous version of the integration the sensor checks fail and the alarm checks still pass.
+- The existing functional tests (command results, ready sensor, adversarial probes, the ready-only trigger test, the legacy built-in actions test with byte-identical frames, and the replay of NeoHub's captured frames) give the same results as before this PR against a NeoHub without `partition_troubles`, apart from the "not ready" text of PR C's commit 12.
+- Upgrade tests (stop, swap the code, start) from the previous two versions, customized as in PR C (renamed entity IDs and names, labels, areas, aliases, the default code option, a hidden and a disabled zone, device name and area, entry title, and the existing ready sensor renamed), with one partition and with four partitions whose alarm panel entities 2-4 were disabled by the user: every existing entity, device and config entry stays identical in the registries and on disk; the only new entities are the trouble sensors (plus the ready sensors when the previous version had none), on the alarm's device, enabled for partition 1 and added disabled for partitions 2-4. With a NeoHub without `partition_troubles` no trouble sensor is added; with unchanged code nothing is added.
+
+## Not tested
+
+- On a real panel through NeoHub. The trouble flag was not observed on a panel; the tests use a fake NeoHub. How quickly the sensor follows the panel depends on NeoHub (its connect-time read and its periodic re-read).
+- `trouble_types` from a real NeoHub: the tests send it from the fake server only.
 ```
