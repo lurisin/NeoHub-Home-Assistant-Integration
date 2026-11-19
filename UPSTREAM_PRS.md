@@ -237,6 +237,11 @@ Commits to cherry-pick, in this order:
 1. `Store the partition trouble flag from NeoHub`
 2. `Add a trouble binary sensor per partition`
 3. `README: panel trouble sensor, troubles in the WebSocket API`
+4. `README: describe NeoHub's trouble re-reads and trouble_types accurately`
+
+Commit 4 corrects the README text of commit 3 after review (interval 0 turns
+off both NeoHub re-reads; `trouble_types` is reserved); it can be squashed into
+commit 3.
 
 Leave out `Bump version to 1.3.0` (fork only) and the `UPSTREAM_PRS.md`
 commits. `Use the neutral text "Partition not ready to arm" for code 1` belongs
@@ -251,7 +256,7 @@ Dependencies:
   created when NeoHub lists `partition_troubles`.
 - **This repository:** the commits apply on top of PR C. In a scratch clone,
   upstream `master` (`6ebc3e0`) plus PR A, PR B, the eight English-only commits
-  of PR C, PR C's commit 12 and these three commits applied without conflicts;
+  of PR C, PR C's commit 12 and these four commits applied without conflicts;
   they also apply without commit 12. The resulting tree equals the fork's tree
   except for the version number, this file and the Features line about the
   Italian translation (see PR C). Submit this after PR C is merged and replace
@@ -272,9 +277,9 @@ Add a binary sensor for the panel trouble state
 
 With a NeoHub that lists `partition_troubles` in `full_state.capabilities`, each partition that has an alarm panel entity gets a binary sensor "<partition> trouble":
 
-- translation key `trouble`, device class `problem` (on = the panel reports a trouble, for example AC power loss or a low battery), unique_id `<session_id>_partition_<n>_trouble`, on the same device as the alarm panel entity;
+- translation key `trouble`, device class `problem` (on = the panel reports a trouble, such as AC power loss or a low battery; not yet observed on a real panel), unique_id `<session_id>_partition_<n>_trouble`, on the same device as the alarm panel entity;
 - created at setup, or with the first `full_state` that lists the capability when NeoHub is updated while Home Assistant runs, named after the setup-time partition name; added disabled when that partition's alarm panel entity is disabled;
-- if NeoHub also sends `trouble_types` (a list of strings), the sensor shows it as the attribute `trouble_types`; NeoHub sends it only if it can read the trouble details, otherwise the sensor has no extra attribute.
+- if NeoHub also sends `trouble_types` (a list of strings), the sensor shows it as the attribute `trouble_types`; the key is reserved for a later NeoHub version (the NeoHub PR this depends on does not send it), and without it the sensor has no extra attribute.
 
 The alarm panel entity does not change: no new attribute, so a trouble change alone does not change its state object and does not fire state triggers on it. With an older NeoHub nothing changes and no sensor is added.
 
@@ -301,6 +306,6 @@ Existing unique_ids, entity names, supported features, the state mapping and the
 
 ## Not tested
 
-- On a real panel through NeoHub. The trouble flag was not observed on a panel; the tests use a fake NeoHub. How quickly the sensor follows the panel depends on NeoHub (its connect-time read and its periodic re-read).
+- On a real panel through NeoHub. The trouble flag was not observed on a panel; the tests use a fake NeoHub. How quickly the sensor follows the panel depends on NeoHub: its connect-time read, its periodic re-read (default 60 s, at least 10 s) and its re-read after an arm rejected as not ready; with the interval at 0 neither re-read runs, and NeoHub skips re-reads while a command is waiting for the panel or the panel is being programmed.
 - `trouble_types` from a real NeoHub: the tests send it from the fake server only.
 ```
