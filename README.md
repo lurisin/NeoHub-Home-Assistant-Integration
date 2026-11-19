@@ -17,6 +17,7 @@ This integration uses the [`pyneohub`](https://github.com/BrianHumlicek/NeoHub-H
 - **Instant arming services** `neohub.arm_home_instant` and `neohub.arm_away_instant` (arm with no entry delay; optional `code`, see [Services](#services)). The partition still shows as Armed Home / Armed Away.
 - **Binary Sensor** entities for each zone (door, window, motion, smoke, etc.)
 - **Ready to arm**: a binary sensor per partition (needs a NeoHub that reports it, see [Ready to arm](#ready-to-arm))
+- **Panel trouble**: a binary sensor per partition that is on while the panel reports a trouble (needs a NeoHub that reports it, see [Panel trouble](#panel-trouble))
 - **Command results**: with a NeoHub that reports them, an arm or disarm action that the panel rejects (for example because a zone is open) or that NeoHub does not confirm fails with an error instead of passing silently (see [Errors](#errors))
 - Real-time push updates via WebSocket — no polling
 - Automatic reconnection with exponential backoff
@@ -104,6 +105,16 @@ A newer NeoHub (one that lists `partition_ready` in its `capabilities`) sends th
 
 With an older NeoHub there is no sensor. If NeoHub is updated while Home Assistant runs, the sensors appear when the integration reconnects. If NeoHub stops reporting the flag while Home Assistant runs, the sensor shows Unknown. After a Home Assistant restart or a reload of the integration with an older NeoHub, the sensor is no longer provided: it shows as unavailable and can be deleted.
 
+## Panel trouble
+
+A newer NeoHub (one that lists `partition_troubles` in its `capabilities`) sends the panel's "troubles present" flag as `troubles` for each partition, for example while the panel reports an AC power loss or a low battery. The integration then adds a binary sensor per partition that has an alarm panel entity, named "*partition* trouble", with device class `problem` (on = the panel reports a trouble, shown as Problem; off = OK), on the same device as the alarm panel entity. If that partition's alarm panel entity is disabled, the sensor is added disabled too.
+
+NeoHub reads the flag when it connects to the panel, re-reads it periodically (by default every 60 seconds; the interval is a NeoHub connection setting, and 0 turns the refresh off) and right after the panel rejects an arm command as not ready. So the sensor can lag behind the panel by up to that interval. The sensor only says that a trouble is present, not which one: the keypad shows the details. If NeoHub also sends `trouble_types` (a list of trouble names), the sensor shows it as the attribute `trouble_types`.
+
+The alarm panel entity does not change: it gets no new attribute, and a change of the trouble flag alone does not change its state or fire state triggers on it.
+
+The sensor follows the same rules as the ready to arm sensor when NeoHub is older or changes version while Home Assistant runs: with an older NeoHub there is no sensor; if NeoHub is updated while Home Assistant runs, the sensors appear when the integration reconnects; if NeoHub stops reporting the flag while Home Assistant runs, the sensor shows Unknown; after a restart or a reload with an older NeoHub it shows as unavailable and can be deleted.
+
 ## Entity Model
 
 | Concept   | HA Entity Type        | Unique ID Format                                        |
@@ -112,6 +123,7 @@ With an older NeoHub there is no sensor. If NeoHub is updated while Home Assista
 | Partition | Alarm Control Panel   | `{session_id}_partition_{partition_number}`              |
 | Zone      | Binary Sensor         | `{session_id}_zone_{zone_number}`                       |
 | Partition ready to arm | Binary Sensor | `{session_id}_partition_{partition_number}_ready` (only with a NeoHub that sends `ready`) |
+| Partition trouble | Binary Sensor (device class `problem`) | `{session_id}_partition_{partition_number}_trouble` (only with a NeoHub that lists `partition_troubles`) |
 
 Zones are session-level entities that can be associated with one or more partitions. Each zone appears as a single binary sensor with its partition associations listed in the entity attributes.
 
@@ -259,13 +271,15 @@ Sent in response to `get_full_state`. Contains the complete hierarchy.
           "partition_number": 1,
           "name": "Main",
           "status": "armed_away",
-          "ready": false
+          "ready": false,
+          "troubles": false
         },
         {
           "partition_number": 2,
           "name": "Garage",
           "status": "disarmed",
-          "ready": true
+          "ready": true,
+          "troubles": true
         }
       ],
       "zones": [
@@ -286,11 +300,13 @@ Sent in response to `get_full_state`. Contains the complete hierarchy.
       ]
     }
   ],
-  "capabilities": ["command_result", "partition_ready"]
+  "capabilities": ["command_result", "partition_ready", "partition_troubles"]
 }
 ```
 
-**`capabilities`** (newer NeoHub only): `command_result` means NeoHub answers commands that carry a `request_id` with a `command_result`; `partition_ready` means each partition has **`ready`** (`true` when the partition is disarmed and ready to arm, `false` otherwise). An older NeoHub sends neither `capabilities` nor `ready`. The integration reads `capabilities` again from every `full_state` and forgets them when the connection drops.
+**`capabilities`** (newer NeoHub only): `command_result` means NeoHub answers commands that carry a `request_id` with a `command_result`; `partition_ready` means each partition has **`ready`** (`true` when the partition is disarmed and ready to arm, `false` otherwise); `partition_troubles` means each partition has **`troubles`** (`true` while the panel reports a trouble). An older NeoHub sends neither `capabilities` nor these keys, and a NeoHub that lists only some of these capabilities sends only the matching keys. The integration reads `capabilities` again from every `full_state` and forgets them when the connection drops.
+
+**`trouble_types`** (optional, next to `troubles`): a list of trouble names in snake_case. NeoHub sends it only if it can read the trouble details from the panel; otherwise the key is absent.
 
 **`status`** values: `disarmed`, `armed_away`, `armed_home`, `armed_night`, `arming`, `pending`, `triggered` (`unknown` until NeoHub has read the partition's status)
 
@@ -298,7 +314,7 @@ Sent in response to `get_full_state`. Contains the complete hierarchy.
 
 #### `partition_update`
 
-Pushed whenever a partition's state changes. A newer NeoHub also sends `ready`, and pushes an update when only `ready` changes.
+Pushed whenever a partition's state changes. A newer NeoHub also sends `ready` (with `partition_ready`) and `troubles` (with `partition_troubles`, and `trouble_types` if it reports them), and pushes an update when only `ready` or only `troubles` changes. A key that is missing from an update keeps its last value.
 
 ```json
 {
@@ -306,7 +322,8 @@ Pushed whenever a partition's state changes. A newer NeoHub also sends `ready`, 
   "session_id": "abc123",
   "partition_number": 1,
   "status": "disarmed",
-  "ready": true
+  "ready": true,
+  "troubles": false
 }
 ```
 
