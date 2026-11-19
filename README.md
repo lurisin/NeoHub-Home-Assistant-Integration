@@ -18,7 +18,6 @@ This integration uses the [`pyneohub`](https://github.com/BrianHumlicek/NeoHub-H
 - **Binary Sensor** entities for each zone (door, window, motion, smoke, etc.)
 - **Ready to arm**: a binary sensor per partition (needs a NeoHub that reports it, see [Ready to arm](#ready-to-arm))
 - **Command results**: with a NeoHub that reports them, an arm or disarm action that the panel rejects (for example because a zone is open) or that NeoHub does not confirm fails with an error instead of passing silently (see [Errors](#errors))
-- English and Italian translations
 - Real-time push updates via WebSocket — no polling
 - Automatic reconnection with exponential backoff
 - HACS compatible

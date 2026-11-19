@@ -126,20 +126,22 @@ Commits to cherry-pick, in this order:
 1. `pyneohub: wait for command_result when NeoHub supports it`
 2. `Raise HomeAssistantError when NeoHub reports a failed command`
 3. `Add the partition ready state: alarm attribute and binary sensor`
-4. `Add Italian translation` (optional; drop it if the maintainer does not
-   want translations beyond English; nothing else depends on it)
+4. `Add Italian translation` (leave out: the fork removed it again in
+   commit 11; nothing else depends on it)
 5. `README: command results, ready to arm, protocol additions`
 6. `pyneohub: mark an orphaned command_result future as retrieved`
 7. `Add ready sensors only for partitions with an alarm panel entity`
 8. `README: ready attribute triggers, NACK results, ready sensor scope`
-9. `it.json: quote the alarm state names in the service descriptions` (only
-   together with commit 4)
+9. `it.json: quote the alarm state names in the service descriptions` (leave
+   out, together with commit 4)
 10. `Drop the ready attribute from the alarm panel entity`
+11. `Remove the Italian translation` (leave out, together with commits 4 and 9)
 
 Commits 6-10 came out of review. Commit 10 removes the alarm panel entity's
 `ready` attribute that commit 3 added and commits 5 and 8 documented, so the
 ready flag is only on the binary sensor; the subjects of commits 3 and 8 still
-name the attribute. Leave out `Bump version to 1.2.0` (fork only) and the
+name the attribute. Leave out `Bump version to 1.2.0` and `Bump version to 1.2.1` (fork only),
+commits 4, 9 and 11 (the fork's code is English only) and the
 `UPSTREAM_PRS.md` commits.
 
 Dependencies:
@@ -193,7 +195,7 @@ With an older NeoHub nothing changes: the command frames are byte-identical, not
 - `alarm_control_panel.py`: one helper maps `NeoHubCommandError` to `HomeAssistantError` with `translation_domain="neohub"` for all six actions. The entity gets no new state attribute.
 - `binary_sensor.py`: the ready sensor. It is created only for partitions that got an alarm panel entity at setup and whose state includes `ready`, and with `entity_registry_enabled_default=False` when that alarm panel entity is disabled in the entity registry. A partition or session that first appears later gets neither entity until a reload. If NeoHub is updated while Home Assistant runs, it is added with the first `full_state` that carries `ready` (one `full_state` callback, unregistered on unload), named after the partition name from setup like the alarm panel entity, not after a `full_state` that NeoHub sends before it has read the panel's labels. The partition name is a translation placeholder, so several partitions do not get the same name.
 - `coordinator.py`: `partition_ready()`. The ready sensor reads `ready` from the client state, so a `full_state` without it (NeoHub downgraded) makes the sensor show unknown instead of a stale value.
-- `strings.json` / `translations/en.json` (identical): `entity.binary_sensor.ready_to_arm` (name and on/off states) and `exceptions`. `translations/it.json`: Italian (optional commit).
+- `strings.json` / `translations/en.json` (identical): `entity.binary_sensor.ready_to_arm` (name and on/off states) and `exceptions`. No other languages.
 - `README.md` / `README_LIBRARY.md`: the new behaviour, the sensor, and the protocol additions.
 
 Existing unique_ids, entity names, supported features and the state mapping are unchanged. There is no version bump.
@@ -202,10 +204,10 @@ Existing unique_ids, entity names, supported features and the state mapping are 
 
 - `python -m compileall custom_components/neohub` passes on Python 3.14 and 3.13. All modules import on Home Assistant 2026.11.2 and 2026.2.3.
 - hassfest from HA core 2026.11.2 and 2026.2.3: 0 invalid integrations; the only output is the existing "Config flows that are discoverable need to set a unique ID" warning.
-- Functional tests on a real `hass` instance (2026.11.2 and 2026.2.3) with the integration's real client and a fake NeoHub WebSocket server implementing the protocol; only timing constants were shortened (76 checks per version, all passing after commits 6-10 too). They cover: success with `request_id`; code 1 on every arm action giving `not_ready_to_arm`; disarm and other rejections giving `command_failed` with the message; the real 10 s timeout and a late answer after it; a dropped connection while waiting (error in well under a second); reconnecting from a new NeoHub to an old one and back (capabilities re-read, sensor unknown, byte-identical frames without waiting); `ready` following `full_state` and `partition_update` (including a ready-only update); the sensor appearing when NeoHub is updated while HA runs, with the setup-time partition name even if the first `full_state` still has default labels; no sensor with an old NeoHub; a script step that arms stopping on a rejection, and carrying on with `continue_on_error: true`; reload and unload; Italian translations; no access code in any log record.
+- Functional tests on a real `hass` instance (2026.11.2 and 2026.2.3) with the integration's real client and a fake NeoHub WebSocket server implementing the protocol; only timing constants were shortened (76 checks per version, all passing after commits 6-10 too). They cover: success with `request_id`; code 1 on every arm action giving `not_ready_to_arm`; disarm and other rejections giving `command_failed` with the message; the real 10 s timeout and a late answer after it; a dropped connection while waiting (error in well under a second); reconnecting from a new NeoHub to an old one and back (capabilities re-read, sensor unknown, byte-identical frames without waiting); `ready` following `full_state` and `partition_update` (including a ready-only update); the sensor appearing when NeoHub is updated while HA runs, with the setup-time partition name even if the first `full_state` still has default labels; no sensor with an old NeoHub; a script step that arms stopping on a rejection, and carrying on with `continue_on_error: true`; reload and unload; no access code in any log record.
 - Four ready-only `partition_update` frames: the ready sensor follows each of them, the alarm panel entity has no `ready` attribute, and a state trigger on the alarm panel entity without `to:` / `from:` fires 0 times, as with the previous version.
 - The previous functional test, unmodified and with an old-style fake NeoHub, gives the same results and the same recorded frames for the built-in actions as before this PR.
-- Upgrade test: an installation set up with the previous version and customized (renamed entity IDs and names, labels, areas, aliases, entity options such as the default code, a hidden and a disabled zone, device name and area, entry title) was stopped, the code swapped, and started again. Every existing entity, device and config entry stayed identical in the registries and on disk, and the only change was the new ready sensor. With an old NeoHub there was no change at all. Also run with Home Assistant set to Italian: the sensor is named "<partition> pronta all'inserimento" and its entity ID is built from that name.
+- Upgrade test: an installation set up with the previous version and customized (renamed entity IDs and names, labels, areas, aliases, entity options such as the default code, a hidden and a disabled zone, device name and area, entry title) was stopped, the code swapped, and started again. Every existing entity, device and config entry stayed identical in the registries and on disk, and the only change was the new ready sensor. With an old NeoHub there was no change at all.
 - Upgrade test with four partitions whose alarm panel entities 2-4 were disabled by the user: only partition 1's ready sensor is enabled; the other three are added disabled by the integration. Every existing registry entry is unchanged.
 - A later `full_state` with a new partition or a second session adds no ready sensor and no device.
 - A drop of the connection while a send is still in progress (forced interleaving): the action fails with "Could not send the command to NeoHub", and asyncio logs no "Future exception was never retrieved".
