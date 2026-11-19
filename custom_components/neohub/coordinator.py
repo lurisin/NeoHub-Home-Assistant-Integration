@@ -54,20 +54,53 @@ class NeoHubCoordinator:
         """Return the current state."""
         return self._client.state
 
+    def _partition(
+        self, session_id: str, partition_number: int
+    ) -> dict[str, Any] | None:
+        """Return a partition's state from the client, or None if unknown."""
+        session = self.state.get(session_id)
+        if session is None:
+            return None
+        for partition in session.get("partitions", []):
+            if partition.get("partition_number") == partition_number:
+                return partition
+        return None
+
     def partition_ready(self, session_id: str, partition_number: int) -> bool | None:
         """Return whether a partition is ready to arm.
 
         None if NeoHub does not report it (older NeoHub) or the partition
         is unknown.
         """
-        session = self.state.get(session_id)
-        if session is None:
+        partition = self._partition(session_id, partition_number)
+        ready = partition.get("ready") if partition is not None else None
+        return ready if isinstance(ready, bool) else None
+
+    def partition_troubles(
+        self, session_id: str, partition_number: int
+    ) -> bool | None:
+        """Return whether the panel reports troubles for a partition.
+
+        None if NeoHub does not report it (older NeoHub) or the partition
+        is unknown.
+        """
+        partition = self._partition(session_id, partition_number)
+        troubles = partition.get("troubles") if partition is not None else None
+        return troubles if isinstance(troubles, bool) else None
+
+    def partition_trouble_types(
+        self, session_id: str, partition_number: int
+    ) -> list[str] | None:
+        """Return the trouble types NeoHub reports for a partition.
+
+        None if NeoHub does not send "trouble_types" or the partition is
+        unknown.
+        """
+        partition = self._partition(session_id, partition_number)
+        types = partition.get("trouble_types") if partition is not None else None
+        if not isinstance(types, list):
             return None
-        for partition in session.get("partitions", []):
-            if partition.get("partition_number") == partition_number:
-                ready = partition.get("ready")
-                return ready if isinstance(ready, bool) else None
-        return None
+        return [t for t in types if isinstance(t, str)]
 
     def async_setup(self) -> None:
         """Register callbacks with the client (idempotent)."""

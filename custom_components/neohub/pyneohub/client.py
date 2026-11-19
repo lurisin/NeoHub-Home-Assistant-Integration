@@ -24,6 +24,10 @@ COMMAND_RESULT_TIMEOUT = 10
 # carry a request_id with a command_result message.
 CAPABILITY_COMMAND_RESULT = "command_result"
 
+# Capability listed in full_state by a NeoHub that sends each partition's
+# trouble flag as "troubles" (and pushes a partition_update when it changes).
+CAPABILITY_PARTITION_TROUBLES = "partition_troubles"
+
 
 class NeoHubError(Exception):
     """Base exception for NeoHub client."""
@@ -507,6 +511,10 @@ class NeoHubClient:
                         partition["status"] = data["status"]
                     if "ready" in data:
                         partition["ready"] = data["ready"]
+                    if "troubles" in data:
+                        partition["troubles"] = data["troubles"]
+                    if "trouble_types" in data:
+                        partition["trouble_types"] = data["trouble_types"]
                     break
 
         for callback in self._on_partition_update:
