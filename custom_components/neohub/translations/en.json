@@ -31,6 +31,14 @@
           "off": "Not ready",
           "on": "Ready"
         }
+      },
+      "trouble": {
+        "name": "{partition} trouble",
+        "state_attributes": {
+          "trouble_types": {
+            "name": "Trouble types"
+          }
+        }
       }
     }
   },

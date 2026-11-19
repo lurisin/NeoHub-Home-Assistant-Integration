@@ -18,6 +18,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, SIGNAL_CONNECTION_STATE, SIGNAL_STATE_UPDATED
 from .coordinator import NeoHubCoordinator
+from .pyneohub.client import CAPABILITY_PARTITION_TROUBLES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,7 +72,12 @@ async def async_setup_entry(
     # labels. A partition that first appears later gets neither entity until
     # the entry is reloaded. If the partition's alarm panel entity is
     # disabled, its ready sensor is added disabled too.
+    #
+    # A "trouble" sensor per partition follows the same rules, except that
+    # it is created when NeoHub lists the "partition_troubles" capability
+    # (from the setup state, or from the first full_state that lists it).
     ready_sensors: set[tuple[str, int]] = set()
+    trouble_sensors: set[tuple[str, int]] = set()
     registry = er.async_get(hass)
     setup_names: dict[tuple[str, int], str] = {
         (session_id, partition["partition_number"]): partition.get(
@@ -83,44 +89,57 @@ async def async_setup_entry(
     }
 
     @callback
-    def _new_ready_sensors() -> list[BinarySensorEntity]:
+    def _alarm_enabled(key: tuple[str, int]) -> bool:
+        alarm_entity_id = registry.async_get_entity_id(
+            "alarm_control_panel", DOMAIN, f"{key[0]}_partition_{key[1]}"
+        )
+        alarm_entry = registry.async_get(alarm_entity_id) if alarm_entity_id else None
+        return alarm_entry is None or not alarm_entry.disabled
+
+    @callback
+    def _new_partition_sensors() -> list[BinarySensorEntity]:
         new: list[BinarySensorEntity] = []
+        troubles_reported = (
+            CAPABILITY_PARTITION_TROUBLES in coordinator.client.capabilities
+        )
         for session_id, session in coordinator.state.items():
             session_name = session.get("name", f"DSC Neo {session_id}")
             for partition in session.get("partitions", []):
                 key = (session_id, partition.get("partition_number"))
-                if (
-                    key not in setup_names
-                    or "ready" not in partition
-                    or key in ready_sensors
-                ):
+                if key not in setup_names:
                     continue
-                ready_sensors.add(key)
-                alarm_entity_id = registry.async_get_entity_id(
-                    "alarm_control_panel", DOMAIN, f"{key[0]}_partition_{key[1]}"
-                )
-                alarm_entry = (
-                    registry.async_get(alarm_entity_id) if alarm_entity_id else None
-                )
-                new.append(
-                    DscPartitionReadySensor(
-                        coordinator=coordinator,
-                        session_id=session_id,
-                        session_name=session_name,
-                        partition_number=key[1],
-                        partition_name=setup_names[key],
-                        enabled_default=alarm_entry is None
-                        or not alarm_entry.disabled,
+                if "ready" in partition and key not in ready_sensors:
+                    ready_sensors.add(key)
+                    new.append(
+                        DscPartitionReadySensor(
+                            coordinator=coordinator,
+                            session_id=session_id,
+                            session_name=session_name,
+                            partition_number=key[1],
+                            partition_name=setup_names[key],
+                            enabled_default=_alarm_enabled(key),
+                        )
                     )
-                )
+                if troubles_reported and key not in trouble_sensors:
+                    trouble_sensors.add(key)
+                    new.append(
+                        DscPartitionTroubleSensor(
+                            coordinator=coordinator,
+                            session_id=session_id,
+                            session_name=session_name,
+                            partition_number=key[1],
+                            partition_name=setup_names[key],
+                            enabled_default=_alarm_enabled(key),
+                        )
+                    )
         return new
 
-    entities.extend(_new_ready_sensors())
+    entities.extend(_new_partition_sensors())
     async_add_entities(entities)
 
     @callback
     def _handle_full_state(_data: dict[str, Any]) -> None:
-        if new := _new_ready_sensors():
+        if new := _new_partition_sensors():
             async_add_entities(new)
 
     entry.async_on_unload(
@@ -244,6 +263,84 @@ class DscPartitionReadySensor(BinarySensorEntity):
         return self._coordinator.partition_ready(
             self._session_id, self._partition_number
         )
+
+    @property
+    def available(self) -> bool:
+        """Return True if the entity is available."""
+        return self._coordinator.connected
+
+    async def async_added_to_hass(self) -> None:
+        """Register dispatch listeners when added to hass."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                f"{SIGNAL_STATE_UPDATED}_partition_{self._session_id}_{self._partition_number}",
+                self._handle_update,
+            )
+        )
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                SIGNAL_CONNECTION_STATE,
+                self._handle_connection_state,
+            )
+        )
+
+    @callback
+    def _handle_update(self, data: dict[str, Any]) -> None:
+        """Handle a partition state update (full_state or partition_update)."""
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_connection_state(self, connected: bool) -> None:
+        """Handle a connection state change."""
+        self.async_write_ha_state()
+
+
+class DscPartitionTroubleSensor(BinarySensorEntity):
+    """Whether the panel reports a trouble for a DSC Neo partition."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "trouble"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+
+    def __init__(
+        self,
+        coordinator: NeoHubCoordinator,
+        session_id: str,
+        session_name: str,
+        partition_number: int,
+        partition_name: str,
+        enabled_default: bool = True,
+    ) -> None:
+        """Initialize the binary sensor entity."""
+        self._coordinator = coordinator
+        self._session_id = session_id
+        self._partition_number = partition_number
+        self._attr_unique_id = f"{session_id}_partition_{partition_number}_trouble"
+        self._attr_entity_registry_enabled_default = enabled_default
+        self._attr_translation_placeholders = {"partition": partition_name}
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, session_id)},
+            name=session_name,
+            manufacturer="DSC",
+            model="Neo",
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True if the panel reports troubles for the partition."""
+        return self._coordinator.partition_troubles(
+            self._session_id, self._partition_number
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return the trouble types, if NeoHub reports them."""
+        types = self._coordinator.partition_trouble_types(
+            self._session_id, self._partition_number
+        )
+        return None if types is None else {"trouble_types": types}
 
     @property
     def available(self) -> bool:
