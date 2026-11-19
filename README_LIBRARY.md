@@ -90,7 +90,7 @@ NeoHubClient(
 #### Properties
 
 - `connected: bool` - Connection status
-- `state: dict[str, Any]` - Current state keyed by session_id. Each partition holds the keys NeoHub sends (`status`, and with a newer NeoHub `ready`, `troubles` and `trouble_types`); a `partition_update` overwrites only the keys it carries
+- `state: dict[str, Any]` - Current state keyed by session_id. Each partition holds the keys NeoHub sends (`status`, and with a newer NeoHub `ready` and `troubles`; `trouble_types` is reserved for a later NeoHub and absent today); a `partition_update` overwrites only the keys it carries
 - `capabilities: frozenset[str]` - Capabilities NeoHub listed in the last `full_state` of the current connection (empty while disconnected or with an older NeoHub)
 
 #### Methods

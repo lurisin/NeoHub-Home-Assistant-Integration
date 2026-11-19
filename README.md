@@ -107,9 +107,9 @@ With an older NeoHub there is no sensor. If NeoHub is updated while Home Assista
 
 ## Panel trouble
 
-A newer NeoHub (one that lists `partition_troubles` in its `capabilities`) sends the panel's "troubles present" flag as `troubles` for each partition, for example while the panel reports an AC power loss or a low battery. The integration then adds a binary sensor per partition that has an alarm panel entity, named "*partition* trouble", with device class `problem` (on = the panel reports a trouble, shown as Problem; off = OK), on the same device as the alarm panel entity. If that partition's alarm panel entity is disabled, the sensor is added disabled too.
+A newer NeoHub (one that lists `partition_troubles` in its `capabilities`) sends the panel's "troubles present" flag as `troubles` for each partition: on while the panel reports a trouble, such as AC power loss or a low battery (not yet observed on a real panel). The integration then adds a binary sensor per partition that has an alarm panel entity, named "*partition* trouble", with device class `problem` (on = the panel reports a trouble, shown as Problem; off = OK), on the same device as the alarm panel entity. If that partition's alarm panel entity is disabled, the sensor is added disabled too.
 
-NeoHub reads the flag when it connects to the panel, re-reads it periodically (by default every 60 seconds; the interval is a NeoHub connection setting, and 0 turns the refresh off) and right after the panel rejects an arm command as not ready. So the sensor can lag behind the panel by up to that interval. The sensor only says that a trouble is present, not which one: the keypad shows the details. If NeoHub also sends `trouble_types` (a list of trouble names), the sensor shows it as the attribute `trouble_types`.
+NeoHub reads the flag when it connects to the panel, re-reads it periodically (by default every 60 seconds; the interval is a NeoHub connection setting, and values below 10 seconds count as 10) and about half a second after the panel rejects an arm command as not ready. Setting the interval to 0 turns off both re-reads, so the flag is then read only when NeoHub connects. So the sensor usually lags behind the panel by up to that interval, and longer while NeoHub is busy with a command or programming, or cannot read the status. The sensor only says that a trouble is present, not which one: the keypad shows the details. The current NeoHub does not send `trouble_types`; the key is reserved for a later version, and if NeoHub sends it (a list of trouble names), the sensor shows it as the attribute `trouble_types`.
 
 The alarm panel entity does not change: it gets no new attribute, and a change of the trouble flag alone does not change its state or fire state triggers on it.
 
@@ -306,7 +306,7 @@ Sent in response to `get_full_state`. Contains the complete hierarchy.
 
 **`capabilities`** (newer NeoHub only): `command_result` means NeoHub answers commands that carry a `request_id` with a `command_result`; `partition_ready` means each partition has **`ready`** (`true` when the partition is disarmed and ready to arm, `false` otherwise); `partition_troubles` means each partition has **`troubles`** (`true` while the panel reports a trouble). An older NeoHub sends neither `capabilities` nor these keys, and a NeoHub that lists only some of these capabilities sends only the matching keys. The integration reads `capabilities` again from every `full_state` and forgets them when the connection drops.
 
-**`trouble_types`** (optional, next to `troubles`): a list of trouble names in snake_case. NeoHub sends it only if it can read the trouble details from the panel; otherwise the key is absent.
+**`trouble_types`** (optional, next to `troubles`): a list of trouble names in snake_case. Reserved for a later NeoHub that can read the trouble details from the panel; the current NeoHub does not send it, and the key is then absent.
 
 **`status`** values: `disarmed`, `armed_away`, `armed_home`, `armed_night`, `arming`, `pending`, `triggered` (`unknown` until NeoHub has read the partition's status)
 
