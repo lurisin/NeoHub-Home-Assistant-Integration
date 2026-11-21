@@ -28,6 +28,11 @@ CAPABILITY_COMMAND_RESULT = "command_result"
 # trouble flag as "troubles" (and pushes a partition_update when it changes).
 CAPABILITY_PARTITION_TROUBLES = "partition_troubles"
 
+# Capability listed in full_state by a NeoHub that sends each partition's
+# siren state as "siren" and its alarm memory flag as "alarm_memory" (and
+# pushes a partition_update when one of them changes).
+CAPABILITY_PARTITION_SIREN_MEMORY = "partition_siren_memory"
+
 # Values of "code_kind" in a command_result: whether "code" is the panel's
 # response code to the command or the code of a NACK from the panel
 # interface. The two code ranges overlap with different meanings.
@@ -538,6 +543,10 @@ class NeoHubClient:
                         partition["troubles"] = data["troubles"]
                     if "trouble_types" in data:
                         partition["trouble_types"] = data["trouble_types"]
+                    if "siren" in data:
+                        partition["siren"] = data["siren"]
+                    if "alarm_memory" in data:
+                        partition["alarm_memory"] = data["alarm_memory"]
                     break
 
         for callback in self._on_partition_update:

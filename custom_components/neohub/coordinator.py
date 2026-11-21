@@ -88,6 +88,18 @@ class NeoHubCoordinator:
         troubles = partition.get("troubles") if partition is not None else None
         return troubles if isinstance(troubles, bool) else None
 
+    def partition_flag(
+        self, session_id: str, partition_number: int, key: str
+    ) -> bool | None:
+        """Return a boolean partition flag NeoHub reports, such as "siren".
+
+        None if NeoHub does not report it (older NeoHub), the value is not a
+        bool, or the partition is unknown.
+        """
+        partition = self._partition(session_id, partition_number)
+        value = partition.get(key) if partition is not None else None
+        return value if isinstance(value, bool) else None
+
     def partition_trouble_types(
         self, session_id: str, partition_number: int
     ) -> list[str] | None:
