@@ -309,3 +309,187 @@ Existing unique_ids, entity names, supported features, the state mapping and the
 - On a real panel through NeoHub. The trouble flag was not observed on a panel; the tests use a fake NeoHub. How quickly the sensor follows the panel depends on NeoHub: its connect-time read, its periodic re-read (default 60 s, at least 10 s) and its re-read after an arm rejected as not ready; with the interval at 0 neither re-read runs, and NeoHub skips re-reads while a command is waiting for the panel or the panel is being programmed.
 - `trouble_types` from a real NeoHub: the tests send it from the fake server only.
 ```
+
+---
+
+## Addendum 4: PR E, PR F and PR G
+
+Three separate drafts, one per NeoHub PR they depend on. They apply in this
+order on top of PR D: PR E, then PR F, then PR G. In a scratch clone the code
+commits of the three PRs, cherry-picked in that order onto the fork's previous
+tip, gave the fork's current code tree exactly; PR F's first commit conflicts
+without PR E (both add constants next to `CAPABILITY_PARTITION_TROUBLES`), and
+PR G conflicts without PR E and PR F. So submit them in this order, each after
+the previous one is merged.
+
+The README changes of all three are in one fork commit, `README: keypad alarms,
+siren and memory, trouble types, FAP, protocol`. On the PR branches split it as
+listed under each PR. Leave out `Bump version to 1.4.0` (fork only) and the
+`UPSTREAM_PRS.md` commits.
+
+The NeoHub PRs are drafted in the NeoHub fork's `UPSTREAM_PRS.md`; their
+numbers go in place of the placeholders below. The message shapes used here
+are the ones decided for NeoHub 0.4.0: `code_kind` in `command_result`;
+`trouble_types`, `siren` and `alarm_memory` per partition; `keypad_alarm`
+messages and `last_keypad_alarm` per session; `activate_fap` with `partition`,
+`fap_type` and a required `request_id`; capabilities in the order
+`command_result`, `partition_ready`, `partition_troubles`, `trouble_types`,
+`keypad_alarms`, `partition_siren_memory`, and `fap` last only while FAP
+commands are turned on in NeoHub.
+
+### PR E: Tell NACK codes from panel response codes
+
+Commits to cherry-pick:
+
+1. `pyneohub: read code_kind; "not ready" only for response code 1`
+2. From the README commit, only: the paragraph about NACK codes and response
+   codes at the end of "Errors", the new example text in the "Any other
+   rejection" row of the Errors table, the `code_kind` bullet in
+   `command_result` (without the FAP parts of the next bullet) and
+   `"code_kind": "response"` in its example.
+
+Depends on **the NeoHub PR "clearer rejection messages" (`code_kind`, text maps
+for response and NACK codes)**: `<NEOHUB_PR_REJECT>`.
+
+#### Title
+
+```
+Tell NACK codes from panel response codes in command results
+```
+
+#### Body
+
+```markdown
+**Depends on BrianHumlicek/NeoHub#<NEOHUB_PR_REJECT>** (`code_kind` in `command_result`). Applies on top of #<PR_D>.
+
+## Summary
+
+The panel's response codes and the panel interface's NACK codes are two number ranges that overlap with different meanings (response 1 is what the panel answers to an arm command when the partition is not ready; NACK 1 is an invalid command length). With the NeoHub PR, `command_result` reports the NACK code in `code` as well and says which kind it is in `code_kind` (`"response"`, `"nack"`, or `null` when `code` is `null`).
+
+- `NeoHubCommandError` gets `code_kind` (`None` when NeoHub reports no code or does not send `code_kind`).
+- An arm command rejected with code 1 raises "Partition not ready to arm" (`not_ready_to_arm`) only when `code_kind` is `"response"` or not reported (an older NeoHub, which only reports response codes in `code`, so its behaviour is unchanged). NACK 1 and every other failure raise "NeoHub command failed: <NeoHub's message>" (`command_failed`), for example "NeoHub command failed: Invalid access code".
+- If NeoHub sends no message, the fallback text names the NACK code for a NACK.
+
+## Testing
+
+- `python -m compileall`, imports on Home Assistant 2026.11.2 and 2026.2.3, hassfest from both cores: 0 invalid integrations.
+- Real `hass` with the real client and a fake NeoHub, on both versions: response 1 on arm -> `not_ready_to_arm`; NACK 1 on arm -> `command_failed` with NeoHub's text; code 1 without `code_kind` on arm -> `not_ready_to_arm` (as before); response 17 and NACK 9 -> `command_failed` with NeoHub's text; response 1 on disarm -> `command_failed`; an unknown `code_kind` string -> `command_failed`; `code` null -> `command_failed`; `NeoHubCommandError.code_kind` checked for each case. The previous functional tests, whose fake NeoHub sends no `code_kind`, pass unchanged.
+
+## Notes
+
+- An explicit `"code_kind": null` next to a numeric `code` (which the NeoHub PR never sends) is treated like a missing `code_kind`.
+- Integration versions without this PR keep working with the new NeoHub, but show "Partition not ready to arm" for an arm command refused with NACK 1, because that NeoHub now reports NACK codes in `code`.
+```
+
+### PR F: Keypad alarm events, siren and alarm memory sensors
+
+Commits to cherry-pick, in this order:
+
+1. `Store the partition siren and alarm memory flags from NeoHub`
+2. `Add siren and alarm in memory binary sensors per partition`
+3. `Handle keypad_alarm messages from NeoHub`
+4. `Add a keypad alarm event entity per partition`
+5. From the README commit: the Features lines for trouble types, keypad
+   alarms and siren and alarm memory; the "Panel trouble" changes (trouble
+   types table, flag turning on sooner); the "Keypad alarms" and "Siren and
+   alarm memory" sections; the three Entity Model rows; the note under "Alarm
+   Panel States"; in the WebSocket API the `full_state` example and the
+   capabilities list without the `fap` bullet, the `partition_update` text and
+   the `keypad_alarm` message; the `state` and `register_keypad_alarm_callback`
+   lines of `README_LIBRARY.md`.
+
+Depends on **the NeoHub PR "trouble types, keypad alarms, siren and alarm
+memory"**: `<NEOHUB_PR_ALARMS>`.
+
+Trouble types need no code change here: since PR D the trouble sensor shows
+`trouble_types` as an attribute whenever NeoHub sends it. The `trouble_types`
+capability changes nothing for the integration, which keys on the field.
+
+#### Title
+
+```
+Add keypad alarm events and siren / alarm memory sensors
+```
+
+#### Body
+
+```markdown
+**Depends on BrianHumlicek/NeoHub#<NEOHUB_PR_ALARMS>** (trouble types, keypad alarms, siren and alarm memory in NeoHub's WebSocket API). Applies on top of #<PR_E>.
+
+## Summary
+
+With a NeoHub that lists the new capabilities, each partition that has an alarm panel entity gets, on the panel device:
+
+- with `keypad_alarms`: an event entity "<partition> keypad alarm" (translation key `keypad_alarm`, unique_id `<session_id>_partition_<n>_keypad_alarm`, event types `fire` and `unknown`, event attribute `code` with the panel's raw alarm type). NeoHub's `keypad_alarm` message fires it; an alarm for a partition Home Assistant does not know (for example 0) is logged as a warning and dropped; any `alarm_type` other than `fire` gives `unknown`.
+- with `partition_siren_memory`: binary sensors "<partition> siren" (`sound`, unique_id `..._siren`) and "<partition> alarm in memory" (`problem`, unique_id `..._alarm_memory`), from `siren` and `alarm_memory`; a `partition_update` without them keeps the last value.
+
+They follow the trouble sensor's rules: created at setup or with the first `full_state` that lists the capability, named after the setup-time partition names, added disabled when the partition's alarm panel entity is disabled, unknown (sensors) when NeoHub stops sending the key, unavailable after a reload against an older NeoHub. The alarm panel entity does not change: no new attribute, no `triggered`, no state change for these frames.
+
+**Replay rule.** NeoHub keeps the last keypad alarm per session as `last_keypad_alarm` in `full_state`, so an alarm that happened while the WebSocket was down is not lost. The coordinator remembers the newest keypad alarm time (NeoHub's clock) seen per session in this run. The first `full_state` after the integration starts or reloads only records it and never fires (a restart does not repeat an old alarm); a later `full_state` fires it only if its time is strictly newer; a `keypad_alarm` message updates the newest time. Only NeoHub's times are compared.
+
+The README states that Home Assistant shows no `triggered` for keypad or other alarms (detection relies on the event entity and the siren sensor) and gives trigger forms that skip the event entity's state changes on reconnects, reloads and entity creation: `event.received` where Home Assistant has it, or a state trigger with `not_from: unavailable`, `not_to: [unavailable, unknown]` and a `trigger.from_state is not none` condition.
+
+## Testing
+
+- compileall, imports and hassfest on Home Assistant 2026.11.2 and 2026.2.3: 0 invalid integrations.
+- Real `hass` with the real client and a fake NeoHub in seven protocol generations (the previous three, all new capabilities, and each new capability on its own), on both versions (110 checks, 111 on 2026.11.2): each entity only with its own capability; registry entries (unique_ids, translation keys, device classes, device, names), states from `full_state` and `partition_update`, keys kept when missing, non-bool values; `trouble_types` only on the trouble sensor; keypad events for `fire`/3, `unknown`/9 and an unknown `alarm_type`, dropped for partitions 0 and 5 and an unknown session, malformed messages logged; the replay rule (no fire from the first `full_state`, none for an equal or older time, one for a strictly newer time after a reconnect, none on a repeat, a fire when the first `full_state` had none, 7-digit `Z` and `+00:00` times); a reload keeps the restored event state and does not fire; downgrade, reload against an older NeoHub, upgrade while Home Assistant runs (setup-time names, disabled for a disabled alarm entity); 0 `state_changed` events on the alarm panel entity and 0 runs of a state trigger on it without `to:`/`from:` for all new frame kinds; the recommended trigger forms ran exactly once per alarm and never for reconnects, reloads or creation.
+- Home Assistant restart in two processes, on both versions: the event entity is restored (time, type, code), the first `full_state` does not fire even with a newer `last_keypad_alarm`, and a new `keypad_alarm` fires once.
+- Upgrade tests (stop, swap the code, start) from the previous three versions, customized (renamed entity IDs and names, labels, areas, aliases, the default code option, hidden and disabled zones, device name and area, entry title, the ready and trouble sensors), with one partition and with four partitions whose alarm panel entities 2-4 were disabled: every existing entity, device and config entry identical in the registries and on disk; the only new entities are the expected ones, on the alarm's device, enabled for partition 1 and disabled by the integration for 2-4.
+- Previous versions against the new NeoHub protocol: they log one warning "Unknown message type 'keypad_alarm'" per message and otherwise ignore it and the new keys.
+
+## Not tested
+
+- On a real panel and against a real NeoHub build of the dependency PR: the tests use a fake NeoHub with the decided message shapes. The keypad alarm type 9 is not identified yet.
+- A keypad alarm that arrives between the first `full_state` and the creation of the entities (during setup) is recorded as seen but has no entity to fire on.
+```
+
+### PR G (experimental, only with the owner's explicit OK): `neohub.activate_fap`
+
+Commits to cherry-pick:
+
+1. `Add the experimental neohub.activate_fap service`
+2. From the README commit: the FAP Features line, the paragraph about
+   `neohub.activate_fap` under "Services", the "FAP alarms (experimental)"
+   section, the `activate_fap` WebSocket message, the `fap` capability bullet,
+   the FAP parts of the `command_result` bullets, and the `activate_fap` entry
+   of `README_LIBRARY.md`.
+
+Depends on **the NeoHub PR "FAP command (experimental)"**: `<NEOHUB_PR_FAP>`,
+and applies on top of PR E and PR F.
+
+This sends a real alarm and is untested on a real panel. The command layout
+comes from `LawPaul/HA_DSC_Neo_ITv2` (GPL-3.0, `ModuleControlActivateFAP` in
+`dsc_itv2/messages.py`) through the NeoHub PR; see that PR's draft for the
+source check. Decide whether to submit it only after a supervised test with
+the monitoring station on test.
+
+#### Title
+
+```
+Add an experimental neohub.activate_fap action (Fire / Auxiliary / Panic)
+```
+
+#### Body
+
+```markdown
+**Depends on BrianHumlicek/NeoHub#<NEOHUB_PR_FAP>** (`activate_fap` and the `fap` capability). Applies on top of #<PR_E> and #<PR_F>.
+
+> **This action triggers a REAL alarm** (as if the F, A or P keys on the keypad were pressed); a monitored panel reports it to the central station. It is experimental and has not been tested on a real panel.
+
+## Summary
+
+- A domain action `neohub.activate_fap`, registered in `async_setup` (with a config-entry-only `CONFIG_SCHEMA`). Every argument is checked before anything is sent; each invalid call raises `ServiceValidationError`: exactly one `alarm_control_panel` entity of a loaded entry (`entity_id` as data or as a target; no `all`, no list of several, no device, area, floor or label), `type` exactly `fire`, `auxiliary` or `panic`, and `confirm` exactly `true`.
+- It raises `HomeAssistantError` if NeoHub does not list the `fap` capability (no fallback for an older NeoHub; NeoHub lists it only while FAP commands are turned on in its settings), and with NeoHub's message if the command fails or is not confirmed ("... the alarm may still have been triggered").
+- pyneohub `activate_fap()` sends `{"type": "activate_fap", "session_id", "partition", "fap_type", "request_id"}` once and waits for the `command_result`; nothing retries it. The alarm kind is `fap_type` because `type` is the message type. The request and result handling of the partition commands moved into two helpers; their frames and texts are unchanged.
+- Every FAP request and its result are logged at Warning.
+- `services.yaml` uses an `entity_id` field with a single-entity selector (not a `target`), so the UI offers exactly one alarm panel entity. There is no button, switch or other entity, and the alarm panel entity does not get the `TRIGGER` feature: entities may be exposed to voice assistants.
+
+## Testing
+
+- compileall, imports and hassfest on Home Assistant 2026.11.2 and 2026.2.3: 0 invalid integrations.
+- Real `hass` with the real client and a fake NeoHub, on both versions: without `fap` -> `HomeAssistantError`, 0 frames; 33 invalid calls (no entity, two entities, a comma list, `all`, `none`, an empty list, a zone, a number, a template alarm panel, a bare state, a missing entity, a user-disabled alarm entity, type missing / `Fire` / `FIRE` / `fires` / 0 / null / a list, confirm missing / false / `"true"` / 1 / `"yes"` / null, `device_id`, `area_id`, `label_id`, extra keys, `fap_type` instead of `type`, a device target, a target with two entities) -> `ServiceValidationError`, 0 frames each; success in data and target form -> exactly one frame with the keys in order; failures (response 23, NACK 9, setting off, NeoHub's panel timeout text) -> `HomeAssistantError` with NeoHub's message, one frame each; a silent NeoHub -> fails after the client timeout with "... the alarm may still have been triggered", one frame, none later; the socket closed while waiting -> fails at once, and after the reconnect still exactly one frame; the send itself failing -> "Could not send the command to NeoHub (...); the alarm may still have been triggered", no retry; the capability withdrawn -> 0 frames; NeoHub not connected -> 0 frames; 0 changes of the alarm panel entity.
+
+## Not tested
+
+- On a real panel. The panel's answer to the command is not documented; the dependency PR's draft says what is known.
+```
