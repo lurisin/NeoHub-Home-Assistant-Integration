@@ -46,6 +46,22 @@
       "alarm_memory": {
         "name": "{partition} alarm in memory"
       }
+    },
+    "event": {
+      "keypad_alarm": {
+        "name": "{partition} keypad alarm",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "fire": "Fire",
+              "unknown": "Unknown"
+            }
+          },
+          "code": {
+            "name": "Code"
+          }
+        }
+      }
     }
   },
   "exceptions": {
