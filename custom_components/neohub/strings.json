@@ -70,6 +70,24 @@
     },
     "not_ready_to_arm": {
       "message": "Partition not ready to arm"
+    },
+    "fap_not_available": {
+      "message": "NeoHub does not offer FAP commands (NeoHub not connected, an older NeoHub, or FAP commands disabled in the NeoHub settings); nothing was sent"
+    },
+    "fap_one_entity": {
+      "message": "Select exactly one DSC Neo alarm panel entity (entity_id) for the FAP command; nothing was sent"
+    },
+    "fap_invalid_keys": {
+      "message": "The FAP command does not accept {keys}: select exactly one alarm panel entity with entity_id; nothing was sent"
+    },
+    "fap_unknown_entity": {
+      "message": "{entity_id} is not an enabled alarm panel entity of a loaded DSC Neo integration entry; nothing was sent"
+    },
+    "fap_invalid_type": {
+      "message": "The FAP type must be fire, auxiliary or panic; nothing was sent"
+    },
+    "fap_not_confirmed": {
+      "message": "Set confirm to true to send the FAP command, which reports a real alarm to the monitoring station; nothing was sent"
     }
   },
   "services": {
@@ -91,6 +109,33 @@
           "name": "Code",
           "description": "Access code. Leave empty to use the entity's default code if one is set in Home Assistant, otherwise NeoHub's default access code."
         }
+      }
+    },
+    "activate_fap": {
+      "name": "Activate FAP alarm (experimental)",
+      "description": "WARNING: triggers a REAL alarm. Sends a Fire, Auxiliary or Panic alarm for one partition, like the F, A and P keys on the keypad; the panel reports it to the monitoring station. Experimental and untested on a real panel. Needs FAP commands enabled in the NeoHub settings. Sent once, never retried.",
+      "fields": {
+        "entity_id": {
+          "name": "Alarm panel",
+          "description": "The one alarm panel entity (partition) to send the alarm for."
+        },
+        "type": {
+          "name": "Type",
+          "description": "Fire, Auxiliary or Panic."
+        },
+        "confirm": {
+          "name": "Confirm",
+          "description": "Must be on (true) to send: confirms that a real alarm is reported to the monitoring station."
+        }
+      }
+    }
+  },
+  "selector": {
+    "fap_type": {
+      "options": {
+        "fire": "Fire",
+        "auxiliary": "Auxiliary",
+        "panic": "Panic"
       }
     }
   }

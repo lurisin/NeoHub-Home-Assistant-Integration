@@ -21,3 +21,26 @@ arm_away_instant:
       selector:
         text:
           type: password
+
+activate_fap:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          filter:
+            - integration: neohub
+              domain: alarm_control_panel
+    type:
+      required: true
+      selector:
+        select:
+          options:
+            - fire
+            - auxiliary
+            - panic
+          translation_key: fap_type
+    confirm:
+      required: true
+      selector:
+        boolean:

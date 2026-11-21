@@ -10,9 +10,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.typing import ConfigType
 
 from .const import CONF_ACCESS_TOKEN, CONF_SSL, DEFAULT_SSL, DOMAIN
 from .coordinator import NeoHubCoordinator
+from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,6 +29,14 @@ CONNECT_RETRY_ATTEMPTS = 3
 CONNECT_RETRY_DELAY = 5
 INITIAL_STATE_TIMEOUT = 30
 STATE_STABLE_SECONDS = 10
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Set up the services of the integration that are not entity services."""
+    async_setup_services(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

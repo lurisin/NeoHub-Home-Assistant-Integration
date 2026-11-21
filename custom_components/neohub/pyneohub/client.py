@@ -38,6 +38,13 @@ CAPABILITY_PARTITION_SIREN_MEMORY = "partition_siren_memory"
 # keys) and the last one of each session as "last_keypad_alarm".
 CAPABILITY_KEYPAD_ALARMS = "keypad_alarms"
 
+# Capability listed in full_state by a NeoHub that accepts activate_fap. It
+# is listed only while FAP commands are enabled in the NeoHub settings.
+CAPABILITY_FAP = "fap"
+
+# The FAP (Fire / Auxiliary / Panic) alarm types activate_fap accepts.
+FAP_TYPES = ("fire", "auxiliary", "panic")
+
 # Values of "code_kind" in a command_result: whether "code" is the panel's
 # response code to the command or the code of a NACK from the panel
 # interface. The two code ranges overlap with different meanings.
@@ -354,6 +361,23 @@ class NeoHubClient:
             )
             return
 
+        result = await self._request(message)
+        if result.get("success") is True:
+            _LOGGER.debug("NeoHub confirmed %s", command_type)
+            return
+        self._raise_for_result(result)
+
+    async def _request(
+        self, message: dict[str, Any], unconfirmed_hint: str | None = None
+    ) -> dict[str, Any]:
+        """Send a message with a new request_id and return its command_result.
+
+        It raises NeoHubCommandUnconfirmedError if no result arrives within
+        COMMAND_RESULT_TIMEOUT seconds, the connection drops while waiting,
+        or the message could not be sent. ``unconfirmed_hint`` replaces "check
+        the alarm state" in the texts of a command that may have been carried
+        out; the "not connected, not sent" text has no hint.
+        """
         request_id = uuid.uuid4().hex
         message["request_id"] = request_id
         future: asyncio.Future[dict[str, Any]] = (
@@ -373,13 +397,25 @@ class NeoHubClient:
             except (aiohttp.ClientError, ConnectionError) as err:
                 raise NeoHubCommandUnconfirmedError(
                     f"Could not send the command to NeoHub: {err}"
+                    if unconfirmed_hint is None
+                    else f"Could not send the command to NeoHub ({err}); "
+                    f"{unconfirmed_hint}"
                 ) from err
             try:
-                result = await asyncio.wait_for(future, COMMAND_RESULT_TIMEOUT)
+                return await asyncio.wait_for(future, COMMAND_RESULT_TIMEOUT)
             except TimeoutError:
                 raise NeoHubCommandUnconfirmedError(
                     f"No confirmation from NeoHub within "
-                    f"{COMMAND_RESULT_TIMEOUT} s; check the alarm state"
+                    f"{COMMAND_RESULT_TIMEOUT} s; "
+                    f"{unconfirmed_hint or 'check the alarm state'}"
+                ) from None
+            except NeoHubCommandUnconfirmedError:
+                # The connection dropped while waiting (_fail_pending_commands).
+                if unconfirmed_hint is None:
+                    raise
+                raise NeoHubCommandUnconfirmedError(
+                    "Connection to NeoHub lost before the command was "
+                    f"confirmed; {unconfirmed_hint}"
                 ) from None
         finally:
             self._pending.pop(request_id, None)
@@ -390,10 +426,9 @@ class NeoHubClient:
             if future.done() and not future.cancelled():
                 future.exception()
 
-        if result.get("success") is True:
-            _LOGGER.debug("NeoHub confirmed %s", command_type)
-            return
-
+    @staticmethod
+    def _raise_for_result(result: dict[str, Any]) -> None:
+        """Raise NeoHubCommandError for a command_result that is not a success."""
         code_value = result.get("code")
         result_code = (
             code_value
@@ -695,3 +730,49 @@ class NeoHubClient:
         await self._send_command(
             "arm_away_instant", session_id, partition_number, code
         )
+
+    async def activate_fap(
+        self, session_id: str, partition: int, fap_type: str
+    ) -> None:
+        """Send a FAP alarm (fire, auxiliary or panic) for a partition, once.
+
+        EXPERIMENTAL. The panel treats it like the keypad's F, A or P key and
+        reports a REAL alarm, for example to a monitoring station. It needs a
+        NeoHub that lists the "fap" capability (FAP commands enabled in its
+        settings); there is no fallback for an older NeoHub. The command is
+        sent at most once and never retried. It waits for the command_result
+        and raises NeoHubCommandError if NeoHub or the panel reports a
+        failure, and NeoHubCommandUnconfirmedError if no result arrives (the
+        alarm may still have been triggered). Nothing is sent when it raises
+        ValueError (invalid arguments) or reports that NeoHub does not offer
+        FAP commands.
+        """
+        if not isinstance(session_id, str):
+            raise ValueError("session_id must be a string")
+        if (
+            not isinstance(partition, int)
+            or isinstance(partition, bool)
+            or partition < 1
+        ):
+            raise ValueError("partition must be an integer of at least 1")
+        if not isinstance(fap_type, str) or fap_type not in FAP_TYPES:
+            raise ValueError(f"fap_type must be one of {', '.join(FAP_TYPES)}")
+        if CAPABILITY_FAP not in self._capabilities:
+            raise NeoHubCommandError(
+                "NeoHub does not offer FAP commands (not connected, an older "
+                "NeoHub, or FAP commands disabled in the NeoHub settings); "
+                "nothing was sent"
+            )
+        message: dict[str, Any] = {
+            "type": "activate_fap",
+            "session_id": session_id,
+            "partition": partition,
+            "fap_type": fap_type,
+        }
+        result = await self._request(
+            message, "the alarm may still have been triggered"
+        )
+        if result.get("success") is True:
+            _LOGGER.debug("NeoHub confirmed activate_fap")
+            return
+        self._raise_for_result(result)

@@ -31,7 +31,7 @@ from .const import (
 )
 from .coordinator import NeoHubCoordinator
 from .pyneohub import NeoHubCommandError
-from .pyneohub.client import CODE_KIND_RESPONSE
+from .pyneohub.client import CAPABILITY_FAP, CODE_KIND_RESPONSE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -236,3 +236,40 @@ class DscAlarmPanel(AlarmControlPanelEntity):
         await self._async_send_command(
             self._coordinator.client.disarm, code, arming=False
         )
+
+    async def async_activate_fap(self, fap_type: str) -> None:
+        """Send a FAP alarm (fire, auxiliary or panic) for this partition.
+
+        EXPERIMENTAL; called by the neohub.activate_fap service after it has
+        checked its arguments. The panel reports a REAL alarm. It needs a
+        NeoHub that lists the "fap" capability, is sent once and never
+        retried, and raises HomeAssistantError with NeoHub's message if it
+        fails or is not confirmed.
+        """
+        client = self._coordinator.client
+        if CAPABILITY_FAP not in client.capabilities:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="fap_not_available",
+            )
+        _LOGGER.warning(
+            "Sending FAP %s for %s (partition %s of session %s)",
+            fap_type,
+            self.entity_id,
+            self._partition_number,
+            self._session_id,
+        )
+        try:
+            await client.activate_fap(
+                self._session_id, self._partition_number, fap_type
+            )
+        except NeoHubCommandError as err:
+            _LOGGER.warning(
+                "FAP %s for %s failed: %s", fap_type, self.entity_id, err.message
+            )
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="command_failed",
+                translation_placeholders={"message": err.message},
+            ) from err
+        _LOGGER.warning("NeoHub confirmed FAP %s for %s", fap_type, self.entity_id)
