@@ -90,7 +90,7 @@ NeoHubClient(
 #### Properties
 
 - `connected: bool` - Connection status
-- `state: dict[str, Any]` - Current state keyed by session_id. Each partition holds the keys NeoHub sends (`status`, and with a newer NeoHub `ready` and `troubles`; `trouble_types` is reserved for a later NeoHub and absent today); a `partition_update` overwrites only the keys it carries
+- `state: dict[str, Any]` - Current state keyed by session_id. Each partition holds the keys NeoHub sends (`status`, and with a newer NeoHub `ready`, `troubles`, `trouble_types`, `siren` and `alarm_memory`); a `partition_update` overwrites only the keys it carries. With a NeoHub that reports keypad alarms, each session also holds `last_keypad_alarm`, which a `keypad_alarm` message updates
 - `capabilities: frozenset[str]` - Capabilities NeoHub listed in the last `full_state` of the current connection (empty while disconnected or with an older NeoHub)
 
 #### Methods
@@ -109,6 +109,7 @@ All registration methods return an unregister function.
 - `register_full_state_callback(callback: Callable[[dict], None])` - Called on full_state message
 - `register_partition_update_callback(callback: Callable[[dict], None])` - Called on partition updates
 - `register_zone_update_callback(callback: Callable[[dict], None])` - Called on zone updates
+- `register_keypad_alarm_callback(callback: Callable[[dict], None])` - Called on `keypad_alarm` messages (a NeoHub that lists `keypad_alarms`); the message has `session_id`, `partition`, `alarm_type`, `code` and `time`
 - `register_error_callback(callback: Callable[[str], None])` - Called on server errors
 
 ##### Commands
@@ -121,6 +122,8 @@ All registration methods return an unregister function.
 - `async disarm(session_id: str, partition_number: int, code: str | None = None)`
 
 The `*_instant` commands need a NeoHub build that supports the `arm_home_instant` / `arm_away_instant` messages; older builds reply with an `error` message.
+
+- `async activate_fap(session_id: str, partition: int, fap_type: str)` - **Experimental, triggers a REAL alarm** (Fire, Auxiliary or Panic, like the keypad keys; a monitored panel reports it to the central station). `fap_type` is exactly `"fire"`, `"auxiliary"` or `"panic"` (`FAP_TYPES`). It needs a NeoHub that lists the `"fap"` capability (FAP commands turned on in NeoHub's settings) and raises `NeoHubCommandError` without sending anything otherwise; invalid arguments raise `ValueError` without sending anything. It is sent once, never retried, and waits for the `command_result` like the commands above; if no result arrives, `NeoHubCommandUnconfirmedError` says that the alarm may still have been triggered.
 
 ##### Command results
 

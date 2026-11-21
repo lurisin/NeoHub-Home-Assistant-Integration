@@ -18,7 +18,11 @@ This integration uses the [`pyneohub`](https://github.com/BrianHumlicek/NeoHub-H
 - **Binary Sensor** entities for each zone (door, window, motion, smoke, etc.)
 - **Ready to arm**: a binary sensor per partition (needs a NeoHub that reports it, see [Ready to arm](#ready-to-arm))
 - **Panel trouble**: a binary sensor per partition that is on while the panel reports a trouble (needs a NeoHub that reports it, see [Panel trouble](#panel-trouble))
+- **Trouble types**: with a NeoHub that reports them, the trouble sensor shows which troubles are active in its attribute `trouble_types` (see [Panel trouble](#panel-trouble))
+- **Keypad alarms**: an event entity per partition that fires when the panel reports a keypad Fire, Auxiliary or Panic alarm (needs a NeoHub that reports them, see [Keypad alarms](#keypad-alarms))
+- **Siren and alarm memory**: two binary sensors per partition, on while the siren sounds and while the panel holds an alarm in memory (needs a NeoHub that reports them, see [Siren and alarm memory](#siren-and-alarm-memory))
 - **Command results**: with a NeoHub that reports them, an arm or disarm action that the panel rejects (for example because a zone is open) or that NeoHub does not confirm fails with an error instead of passing silently (see [Errors](#errors))
+- **FAP alarms (experimental, sends a real alarm)**: the action `neohub.activate_fap` sends a Fire, Auxiliary or Panic alarm like the keypad keys; it only works when FAP commands are turned on in NeoHub (see [FAP alarms](#fap-alarms-experimental))
 - Real-time push updates via WebSocket — no polling
 - Automatic reconnection with exponential backoff
 - HACS compatible
@@ -71,6 +75,8 @@ Notes:
 - With a NeoHub that reports command results, the action waits for the result and fails if the panel rejects the command or NeoHub does not confirm it, like the standard arm and disarm actions (see [Errors](#errors)). With an older NeoHub the call is fire-and-forget: Home Assistant does not fail the action if NeoHub or the panel rejects the command. Check the log (`NeoHub server error: ...`) or the partition state.
 - The services exist only once the NeoHub config entry is loaded. Until then (for example while NeoHub is unreachable at startup), calling them fails with an "action not found" error. After that they stay registered until Home Assistant restarts. If the entry is later unloaded (disabled, deleted or reloading) or the alarm panel entity is unavailable (NeoHub disconnected), a call does nothing and does not fail; at most Home Assistant logs a warning that the entity is missing or not currently available. Check the partition state.
 
+The integration also adds the experimental action `neohub.activate_fap`, which **sends a real alarm**; see [FAP alarms](#fap-alarms-experimental). Unlike the two services above, it is registered when Home Assistant loads the integration and fails with a validation error (sending nothing) when its alarm panel entity is not loaded.
+
 ## Errors
 
 A NeoHub that lists `command_result` in its `capabilities` (see the [WebSocket API](#websocket-api-specification)) reports the outcome of every command. With such a NeoHub, the arm actions (`alarm_control_panel.alarm_arm_home`, `alarm_arm_away`, `alarm_arm_night`, `neohub.arm_home_instant`, `neohub.arm_away_instant`) and `alarm_control_panel.alarm_disarm` wait up to 10 seconds for the result:
@@ -79,7 +85,7 @@ A NeoHub that lists `command_result` in its `capabilities` (see the [WebSocket A
 |---|---|
 | The panel accepted the command | Succeeds |
 | The panel rejected an arm command with response code 1 (partition not ready to arm, for example because a zone is open; the panel's description of code 1 is generic and names no cause, so other causes are possible) | Fails: "Partition not ready to arm" |
-| Any other rejection (for example a wrong code), a refusal by the panel interface (a NACK, for example because it is busy) or a NeoHub error | Fails: "NeoHub command failed: ..." with NeoHub's message, for example "Command refused by the panel interface (NACK: SystemBusy)" |
+| Any other rejection (for example a wrong code), a refusal by the panel interface (a NACK, for example because it is busy) or a NeoHub error | Fails: "NeoHub command failed: ..." with NeoHub's message, for example "NeoHub command failed: Invalid access code" or "NeoHub command failed: Keypad locked out" (an older NeoHub words them differently, for example "Command refused by the panel interface (NACK: SystemBusy)") |
 | No result within 10 seconds, or the connection to NeoHub drops while waiting | Fails: "NeoHub command failed: No confirmation from NeoHub within 10 s; check the alarm state" (or "Connection to NeoHub lost before the command was confirmed; ..."). The panel may still have carried out the command, so check the partition state. |
 
 **Behaviour change in 1.2.0:** before 1.2.0, these actions always succeeded and a rejection only showed up in the log. Now a rejected or unconfirmed arm or disarm raises an error, so a script or automation step that arms or disarms stops there and the following steps do not run. If the automation should carry on anyway, set `continue_on_error: true` on that step:
@@ -99,6 +105,8 @@ This only matters for scripts and automations that arm or disarm themselves and 
 
 With an older NeoHub that does not list `command_result`, nothing changes: the actions return as soon as the command is sent and never fail because of the panel's answer.
 
+The panel interface's NACK codes and the panel's response codes are two different number ranges that overlap with different meanings. A newer NeoHub says which one `code` is (`code_kind`, see [`command_result`](#command_result)): only response code 1 on an arm command means "not ready". NACK code 1 (an invalid command length) and every other code give "NeoHub command failed: ..." with NeoHub's text. A NeoHub that does not send `code_kind` only reports response codes, so code 1 on an arm command still gives "Partition not ready to arm".
+
 ## Ready to arm
 
 A newer NeoHub (one that lists `partition_ready` in its `capabilities`) sends the panel's "ready" flag as `ready` for each partition. The partition is ready to arm when it is disarmed and nothing prevents arming, typically when all of its zones are closed. NeoHub sends `false` while the partition is not disarmed (armed, exit or entry delay, alarm). The integration then adds a binary sensor per partition that has an alarm panel entity, named "*partition* ready to arm" (on = ready, off = not ready), on the same device as the alarm panel entity. If that partition's alarm panel entity is disabled, the sensor is added disabled too.
@@ -107,13 +115,101 @@ With an older NeoHub there is no sensor. If NeoHub is updated while Home Assista
 
 ## Panel trouble
 
-A newer NeoHub (one that lists `partition_troubles` in its `capabilities`) sends the panel's "troubles present" flag as `troubles` for each partition: on while the panel reports a trouble, such as AC power loss or a low battery (not yet observed on a real panel). The integration then adds a binary sensor per partition that has an alarm panel entity, named "*partition* trouble", with device class `problem` (on = the panel reports a trouble, shown as Problem; off = OK), on the same device as the alarm panel entity. If that partition's alarm panel entity is disabled, the sensor is added disabled too.
+A newer NeoHub (one that lists `partition_troubles` in its `capabilities`) sends the panel's "troubles present" flag as `troubles` for each partition: on while the panel reports a trouble, such as AC power loss, an open cabinet (tamper) or a disconnected backup battery. The integration then adds a binary sensor per partition that has an alarm panel entity, named "*partition* trouble", with device class `problem` (on = the panel reports a trouble, shown as Problem; off = OK), on the same device as the alarm panel entity. If that partition's alarm panel entity is disabled, the sensor is added disabled too.
 
-NeoHub reads the flag when it connects to the panel, re-reads it periodically (by default every 60 seconds; the interval is a NeoHub connection setting, and values below 10 seconds count as 10) and about half a second after the panel rejects an arm command as not ready. Setting the interval to 0 turns off both re-reads, so the flag is then read only when NeoHub connects. So the sensor usually lags behind the panel by up to that interval, and longer while NeoHub is busy with a command or programming, or cannot read the status. The sensor only says that a trouble is present, not which one: the keypad shows the details. The current NeoHub does not send `trouble_types`; the key is reserved for a later version, and if NeoHub sends it (a list of trouble names), the sensor shows it as the attribute `trouble_types`.
+NeoHub reads the flag when it connects to the panel, re-reads it periodically (by default every 60 seconds; the interval is a NeoHub connection setting, and values below 10 seconds count as 10) and about half a second after the panel rejects an arm command as not ready. Setting the interval to 0 turns off both re-reads, so the flag is then read only when NeoHub connects. So the sensor usually lags behind the panel by up to that interval, and longer while NeoHub is busy with a command or programming, or cannot read the status. A NeoHub that also lists `trouble_types` turns the flag on as soon as the panel reports a trouble, without waiting for the next re-read; it still turns it off only when a read of the panel status reports no troubles.
+
+**Trouble types.** A NeoHub that lists `trouble_types` sends `trouble_types`, the list of active troubles, and the sensor shows it as its attribute `trouble_types` (the integration shows the key whenever NeoHub sends it, so the capability changes nothing for it; integration 1.3.0 already does the same). The troubles are panel-wide, so the list is the same for every partition, and it is empty while that partition's `troubles` is off. The names:
+
+| Name | Meaning |
+|---|---|
+| `ac_failure` | AC power failure |
+| `tamper` | Cabinet tamper (panel cabinet open) |
+| `battery_disconnected` | Backup battery disconnected |
+| `unknown_<a>_<b>_<c>` | A trouble the panel reported with a code NeoHub has no name for, in hex, for example `unknown_00_8a_00` (a low battery probably shows up like this) |
+| `unknown` | The panel reports a trouble but NeoHub has not received its details, for example a trouble that was already active when NeoHub connected to the panel |
+
+The names are stable: new names may be added, existing ones are not renamed. With an older NeoHub the attribute is missing and the sensor only says that a trouble is present: the keypad shows the details.
 
 The alarm panel entity does not change: it gets no new attribute, and a change of the trouble flag alone does not change its state or fire state triggers on it.
 
 The sensor follows the same rules as the ready to arm sensor when NeoHub is older or changes version while Home Assistant runs: with an older NeoHub there is no sensor; if NeoHub is updated while Home Assistant runs, the sensors appear when the integration reconnects; if NeoHub stops reporting the flag while Home Assistant runs, the sensor shows Unknown; after a restart or a reload with an older NeoHub it shows as unavailable and can be deleted.
+
+## Keypad alarms
+
+A NeoHub that lists `keypad_alarms` in its `capabilities` reports the alarms of the keypad's alarm keys (the F, A and P key pairs: Fire, Auxiliary, Panic). The integration then adds an event entity per partition that has an alarm panel entity, named "*partition* keypad alarm", on the same device as the alarm panel entity. It follows the trouble sensor's rules: added disabled when that partition's alarm panel entity is disabled, none with an older NeoHub, added when NeoHub is updated while Home Assistant runs, unavailable after a restart or reload with an older NeoHub.
+
+- Event types: `fire` (the Fire key, panel alarm type 3) and `unknown` (any other alarm type; type 9, which the Auxiliary and Panic keys can produce, is not identified yet and may get its own event type later).
+- Event attribute `code`: the panel's alarm type number (3, 9, ...).
+- The event fires once per keypad alarm. The panel restores a keypad alarm within milliseconds, so it is a momentary event, not a state.
+- If the connection to NeoHub was down when the alarm happened, the event fires when the integration reconnects (NeoHub keeps the last keypad alarm, see `last_keypad_alarm` in the [WebSocket API](#full_state)). After a Home Assistant restart or a reload of the integration an earlier alarm is not fired again, and the entity keeps showing the last event from before.
+- An alarm for a partition that Home Assistant does not know (for example partition 0) is logged as a warning and dropped.
+
+**Home Assistant shows no `triggered` for keypad or other alarms.** During a keypad alarm the alarm panel entity stays Disarmed or Armed: many automations react to that entity's states, and a momentary alarm has no defined end for `triggered`. NeoHub does not report `triggered` while other alarms are going on either (it only reads the panel's "in alarm" flag when it connects to the panel). Detect alarms with the keypad alarm event entity and the [siren sensor](#siren-and-alarm-memory).
+
+The event entity's state is the time of its last event, and it also changes when NeoHub disconnects and reconnects (to unavailable and back), when the integration is reloaded and when the entity is created. To react only to keypad alarms, use the `event.received` trigger where Home Assistant has it (2026.11 does, 2026.2 does not):
+
+```yaml
+triggers:
+  - trigger: event.received
+    target:
+      entity_id: event.example_keypad_alarm
+    options:
+      event_type:
+        - fire
+        - unknown
+```
+
+or, with any version, a state trigger that skips those changes:
+
+```yaml
+triggers:
+  - trigger: state
+    entity_id: event.example_keypad_alarm
+    not_from: unavailable
+    not_to:
+      - unavailable
+      - unknown
+conditions:
+  - condition: template
+    value_template: "{{ trigger.from_state is not none }}"
+actions:
+  - action: notify.notify
+    data:
+      message: >-
+        Keypad alarm: {{ trigger.to_state.attributes.event_type }}
+        (code {{ trigger.to_state.attributes.code }})
+```
+
+A plain state trigger without `not_from` / `not_to` also runs on every NeoHub reconnect (twice) and reload.
+
+## Siren and alarm memory
+
+A NeoHub that lists `partition_siren_memory` in its `capabilities` sends `siren` and `alarm_memory` for each partition. The integration then adds two binary sensors per partition that has an alarm panel entity, with the same rules as the trouble sensor:
+
+- "*partition* siren", device class `sound`: on (Detected) while the partition's siren (bell) sounds. NeoHub takes it from the panel's bell notifications and also turns it off when the partition is armed or disarmed, so a missed "off" cannot hide the next alarm.
+- "*partition* alarm in memory", device class `problem`: on (Problem) while the panel holds an alarm in memory for the partition. DSC panels clear the alarm memory at the next arming.
+
+A `partition_update` without these keys keeps the last value; if NeoHub stops sending them, the sensors show Unknown. The alarm panel entity does not change: no new attribute, no state change and no state trigger for these flags.
+
+## FAP alarms (experimental)
+
+> **WARNING: `neohub.activate_fap` triggers a REAL alarm.** It makes the panel raise a Fire, Auxiliary or Panic alarm as if the F, A or P keys on the keypad had been pressed. On a monitored panel the alarm is reported to the central station, which may send the fire brigade, an ambulance or the police. Test it only with the monitoring station informed and the account on test.
+
+- **Experimental and untested on a real panel.** The command layout comes from another open-source ITv2 implementation and has not been confirmed on a panel; the panel's answer is not documented. The panel may reject the command (the action then fails with NeoHub's message) or handle it differently.
+- **Off by default.** It needs a NeoHub that supports it, with FAP commands turned on in NeoHub's settings (the setting `AllowFapCommands` on NeoHub's settings page, off by default). Only then does NeoHub list the `fap` capability. Without it the action fails with "NeoHub does not offer FAP commands ..." and nothing is sent; there is no fallback for an older NeoHub. Turn the setting off again after testing.
+- The action takes exactly one alarm panel entity of this integration (`entity_id`, as data or as a target; not a list of several, a device, an area or a label), `type` (`fire`, `auxiliary` or `panic`, exactly) and `confirm`, which must be `true`. Anything else fails with a validation error, and nothing is sent.
+- It is sent once and never retried, not even after a timeout or a reconnect. It waits up to 10 seconds for NeoHub's result and fails with NeoHub's message if the panel rejects it. If no answer arrives it fails with "... the alarm may still have been triggered": check the keypad and the monitoring station before trying again.
+- Every FAP request and its result are logged as warnings.
+- There is deliberately no button, switch or other entity for it, and the alarm panel entity does not get the `trigger` feature: entities may be exposed to voice assistants, and a stray call would send a real alarm.
+
+```yaml
+action: neohub.activate_fap
+data:
+  entity_id: alarm_control_panel.example
+  type: fire
+  confirm: true
+```
 
 ## Entity Model
 
@@ -124,6 +220,9 @@ The sensor follows the same rules as the ready to arm sensor when NeoHub is olde
 | Zone      | Binary Sensor         | `{session_id}_zone_{zone_number}`                       |
 | Partition ready to arm | Binary Sensor | `{session_id}_partition_{partition_number}_ready` (only with a NeoHub that sends `ready`) |
 | Partition trouble | Binary Sensor (device class `problem`) | `{session_id}_partition_{partition_number}_trouble` (only with a NeoHub that lists `partition_troubles`) |
+| Partition siren | Binary Sensor (device class `sound`) | `{session_id}_partition_{partition_number}_siren` (only with a NeoHub that lists `partition_siren_memory`) |
+| Partition alarm in memory | Binary Sensor (device class `problem`) | `{session_id}_partition_{partition_number}_alarm_memory` (only with a NeoHub that lists `partition_siren_memory`) |
+| Partition keypad alarm | Event (event types `fire`, `unknown`) | `{session_id}_partition_{partition_number}_keypad_alarm` (only with a NeoHub that lists `keypad_alarms`) |
 
 Zones are session-level entities that can be associated with one or more partitions. Each zone appears as a single binary sensor with its partition associations listed in the entity attributes.
 
@@ -139,7 +238,7 @@ Zones are session-level entities that can be associated with one or more partiti
 | `pending`      | Pending         |
 | `triggered`    | Triggered       |
 
-`arming` means the exit delay is running and `pending` means the entry delay is running. Before NeoHub has read a partition's status it reports `unknown`, which shows as Unknown in Home Assistant.
+`arming` means the exit delay is running and `pending` means the entry delay is running. Before NeoHub has read a partition's status it reports `unknown`, which shows as Unknown in Home Assistant. NeoHub does not report `triggered` while an alarm is going on, only when it connects to a panel that is in alarm (see [Keypad alarms](#keypad-alarms)).
 
 ---
 
@@ -253,6 +352,20 @@ The integration sends `request_id` (a uuid4 in hex) only when the last `full_sta
 }
 ```
 
+#### `activate_fap` (experimental, sends a real alarm)
+
+Sends a FAP alarm for a partition, like the keypad's F, A or P keys (see [FAP alarms](#fap-alarms-experimental)). Only a NeoHub that lists `fap` in `capabilities` accepts it. `partition`, `fap_type` (exactly `fire`, `auxiliary` or `panic`) and `request_id` are required (without `request_id` NeoHub answers with an `error` message and sends nothing); the alarm kind is `fap_type` because `type` is the message type. There is no access code. NeoHub answers with a [`command_result`](#command_result); a NeoHub whose FAP commands are turned off answers `success: false` with "FAP commands are disabled in the NeoHub settings" and sends nothing to the panel. The integration sends it once and never retries it.
+
+```json
+{
+  "type": "activate_fap",
+  "session_id": "abc123",
+  "partition": 1,
+  "fap_type": "fire",
+  "request_id": "6f1c0e8d2b7a4b0f9c3e5a1d2f4b6c8e"
+}
+```
+
 ### Server → Client Messages
 
 #### `full_state`
@@ -272,14 +385,20 @@ Sent in response to `get_full_state`. Contains the complete hierarchy.
           "name": "Main",
           "status": "armed_away",
           "ready": false,
-          "troubles": false
+          "troubles": false,
+          "trouble_types": [],
+          "siren": false,
+          "alarm_memory": false
         },
         {
           "partition_number": 2,
           "name": "Garage",
           "status": "disarmed",
           "ready": true,
-          "troubles": true
+          "troubles": true,
+          "trouble_types": ["ac_failure"],
+          "siren": false,
+          "alarm_memory": true
         }
       ],
       "zones": [
@@ -297,16 +416,30 @@ Sent in response to `get_full_state`. Contains the complete hierarchy.
           "open": false,
           "partitions": [1]
         }
-      ]
+      ],
+      "last_keypad_alarm": {
+        "partition": 2,
+        "alarm_type": "fire",
+        "code": 3,
+        "time": "2026-01-01T10:00:00.0000000Z"
+      }
     }
   ],
-  "capabilities": ["command_result", "partition_ready", "partition_troubles"]
+  "capabilities": ["command_result", "partition_ready", "partition_troubles", "trouble_types", "keypad_alarms", "partition_siren_memory"]
 }
 ```
 
-**`capabilities`** (newer NeoHub only): `command_result` means NeoHub answers commands that carry a `request_id` with a `command_result`; `partition_ready` means each partition has **`ready`** (`true` when the partition is disarmed and ready to arm, `false` otherwise); `partition_troubles` means each partition has **`troubles`** (`true` while the panel reports a trouble). An older NeoHub sends neither `capabilities` nor these keys, and a NeoHub that lists only some of these capabilities sends only the matching keys. The integration reads `capabilities` again from every `full_state` and forgets them when the connection drops.
+**`capabilities`** (newer NeoHub only), in this order:
 
-**`trouble_types`** (optional, next to `troubles`): a list of trouble names in snake_case. Reserved for a later NeoHub that can read the trouble details from the panel; the current NeoHub does not send it, and the key is then absent.
+- `command_result`: NeoHub answers commands that carry a `request_id` with a `command_result`.
+- `partition_ready`: each partition has **`ready`** (`true` when the partition is disarmed and ready to arm, `false` otherwise).
+- `partition_troubles`: each partition has **`troubles`** (`true` while the panel reports a trouble).
+- `trouble_types`: each partition has **`trouble_types`** next to `troubles`: the list of active troubles (see [Panel trouble](#panel-trouble) for the names), the same panel-wide list on every partition, `[]` whenever that partition's `troubles` is `false`.
+- `keypad_alarms`: NeoHub sends a [`keypad_alarm`](#keypad_alarm) message for each keypad alarm, and each session has **`last_keypad_alarm`**: the last keypad alarm of that session as `{"partition", "alarm_type", "code", "time"}` (the fields of `keypad_alarm`), or `null`. NeoHub keeps it in memory only (not across a NeoHub restart).
+- `partition_siren_memory`: each partition has **`siren`** (`true` while the partition's siren sounds) and **`alarm_memory`** (`true` while the panel holds an alarm in memory for the partition).
+- `fap` (last, only while FAP commands are turned on in NeoHub's settings): NeoHub accepts [`activate_fap`](#activate_fap-experimental-sends-a-real-alarm). When the setting changes, NeoHub sends a new `full_state` to every client.
+
+An older NeoHub sends neither `capabilities` nor these keys, and a NeoHub that lists only some of these capabilities sends only the matching keys. The integration reads `capabilities` again from every `full_state` and forgets them when the connection drops. It reads `trouble_types`, `siren` and `alarm_memory` whenever they are present.
 
 **`status`** values: `disarmed`, `armed_away`, `armed_home`, `armed_night`, `arming`, `pending`, `triggered` (`unknown` until NeoHub has read the partition's status)
 
@@ -314,7 +447,7 @@ Sent in response to `get_full_state`. Contains the complete hierarchy.
 
 #### `partition_update`
 
-Pushed whenever a partition's state changes. A newer NeoHub also sends `ready` (with `partition_ready`) and `troubles` (with `partition_troubles`, and `trouble_types` if it reports them), and pushes an update when only `ready` or only `troubles` changes. A key that is missing from an update keeps its last value.
+Pushed whenever a partition's state changes. A newer NeoHub also sends `ready` (with `partition_ready`), `troubles` (with `partition_troubles`), `trouble_types` (with `trouble_types`) and `siren` and `alarm_memory` (with `partition_siren_memory`), and pushes an update when only one of them changes. A key that is missing from an update keeps its last value.
 
 ```json
 {
@@ -340,6 +473,23 @@ Pushed whenever a zone's state changes.
 }
 ```
 
+#### `keypad_alarm`
+
+Sent by a NeoHub that lists `keypad_alarms` when the panel reports a keypad alarm (the F, A and P keys). `alarm_type` is `fire` (panel alarm type 3) or `unknown` (any other type, including 9); `code` is the panel's alarm type number; `time` is when NeoHub received it (UTC, ISO 8601, NeoHub's clock). `partition` may be a partition the client does not know (for example 0). The partition's `status` does not change.
+
+```json
+{
+  "type": "keypad_alarm",
+  "session_id": "abc123",
+  "partition": 1,
+  "alarm_type": "fire",
+  "code": 3,
+  "time": "2026-01-01T10:00:00.0000000Z"
+}
+```
+
+The integration fires the partition's keypad alarm event for each message. From `full_state` it fires `last_keypad_alarm` only when its `time` is strictly newer than the newest keypad alarm it has seen since it started, and never from the first `full_state` after it starts or is reloaded.
+
 #### `command_result`
 
 Sent only to the connection that sent the command, once per command that carried a `request_id`, when the command completes or fails for any reason.
@@ -350,13 +500,15 @@ Sent only to the connection that sent the command, once per command that carried
   "request_id": "6f1c0e8d2b7a4b0f9c3e5a1d2f4b6c8e",
   "success": false,
   "code": 1,
+  "code_kind": "response",
   "message": "Partition not ready to arm"
 }
 ```
 
 - On success `code` and `message` are `null`.
 - When the panel rejects the command, `code` is the panel's numeric response code. For an arm command, `1` means the partition is not ready to arm (for example a zone is open).
-- When the command fails before or around the panel (session not found, no access code, timeout, or the panel interface refused it with a NACK), `code` is `null` and `message` describes the failure. NeoHub waits up to 8 seconds for the panel; after that it reports "No confirmation from the panel within 8 s; check the partition state" (the panel may still have acted).
+- A newer NeoHub also sends **`code_kind`** next to `code`: `"response"` when `code` is the panel's response code, `"nack"` when it is the code of a NACK from the panel interface (the two ranges overlap with different meanings: NACK 1 is not "not ready"), and `null` whenever `code` is `null`. An older NeoHub does not send `code_kind`, reports a NACK with `code` `null` and only reports response codes in `code`.
+- When the command fails before or around the panel (session not found, no access code, timeout, FAP commands turned off, or with an older NeoHub a NACK), `code` is `null` and `message` describes the failure. NeoHub waits up to 8 seconds for the panel; after that it reports "No confirmation from the panel within 8 s; check the partition state" (the panel may still have acted; for `activate_fap`: "No answer from the panel: the alarm may still have been triggered").
 
 #### `error`
 
