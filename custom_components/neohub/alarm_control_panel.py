@@ -31,6 +31,7 @@ from .const import (
 )
 from .coordinator import NeoHubCoordinator
 from .pyneohub import NeoHubCommandError
+from .pyneohub.client import CODE_KIND_RESPONSE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -176,11 +177,20 @@ class DscAlarmPanel(AlarmControlPanelEntity):
 
         A NeoHub without command results never reports one, so with it the
         call returns as soon as the command is sent (as before).
+
+        Code 1 means "not ready" only as the panel's response code to an arm
+        command. NACK code 1 means something else, so it gets NeoHub's
+        message. An older NeoHub does not report code_kind and only reports
+        response codes, so a code without code_kind counts as one.
         """
         try:
             await command(self._session_id, self._partition_number, code)
         except NeoHubCommandError as err:
-            if arming and err.code == PANEL_RESPONSE_NOT_READY:
+            if (
+                arming
+                and err.code == PANEL_RESPONSE_NOT_READY
+                and err.code_kind in (None, CODE_KIND_RESPONSE)
+            ):
                 raise HomeAssistantError(
                     translation_domain=DOMAIN,
                     translation_key="not_ready_to_arm",

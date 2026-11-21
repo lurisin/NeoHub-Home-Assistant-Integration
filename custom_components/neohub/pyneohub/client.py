@@ -28,6 +28,12 @@ CAPABILITY_COMMAND_RESULT = "command_result"
 # trouble flag as "troubles" (and pushes a partition_update when it changes).
 CAPABILITY_PARTITION_TROUBLES = "partition_troubles"
 
+# Values of "code_kind" in a command_result: whether "code" is the panel's
+# response code to the command or the code of a NACK from the panel
+# interface. The two code ranges overlap with different meanings.
+CODE_KIND_RESPONSE = "response"
+CODE_KIND_NACK = "nack"
+
 
 class NeoHubError(Exception):
     """Base exception for NeoHub client."""
@@ -40,15 +46,25 @@ class NeoHubConnectionError(NeoHubError):
 class NeoHubCommandError(NeoHubError):
     """NeoHub reported that a command failed.
 
-    ``code`` is the panel's numeric response code when the panel rejected
-    the command, otherwise ``None``. ``message`` is NeoHub's description.
+    ``code`` is the numeric code NeoHub reported when the panel rejected
+    the command, otherwise ``None``. ``code_kind`` says what kind of code it
+    is: ``"response"`` (the panel's response code) or ``"nack"`` (a NACK from
+    the panel interface). It is ``None`` when NeoHub did not report it (an
+    older NeoHub that only reports response codes) or reported no code.
+    ``message`` is NeoHub's description.
     """
 
-    def __init__(self, message: str, code: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        code: int | None = None,
+        code_kind: str | None = None,
+    ) -> None:
         """Initialize the error."""
         super().__init__(message)
         self.message = message
         self.code = code
+        self.code_kind = code_kind
 
 
 class NeoHubCommandUnconfirmedError(NeoHubCommandError):
@@ -362,14 +378,21 @@ class NeoHubClient:
             if isinstance(code_value, int) and not isinstance(code_value, bool)
             else None
         )
+        kind_value = result.get("code_kind")
+        code_kind = (
+            kind_value
+            if result_code is not None and isinstance(kind_value, str)
+            else None
+        )
         text = result.get("message")
         if not isinstance(text, str) or not text:
-            text = (
-                f"The panel rejected the command (response code {result_code})"
-                if result_code is not None
-                else "NeoHub reported that the command failed"
-            )
-        raise NeoHubCommandError(text, result_code)
+            if result_code is None:
+                text = "NeoHub reported that the command failed"
+            elif code_kind == CODE_KIND_NACK:
+                text = f"The panel interface refused the command (NACK {result_code})"
+            else:
+                text = f"The panel rejected the command (response code {result_code})"
+        raise NeoHubCommandError(text, result_code, code_kind)
 
     def _fail_pending_commands(self) -> None:
         """Fail every command still waiting for its command_result."""
