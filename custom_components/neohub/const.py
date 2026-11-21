@@ -10,6 +10,7 @@ DEFAULT_SSL = False
 
 SIGNAL_STATE_UPDATED = f"{DOMAIN}_state_updated"
 SIGNAL_CONNECTION_STATE = f"{DOMAIN}_connection_state"
+SIGNAL_KEYPAD_ALARM = f"{DOMAIN}_keypad_alarm"
 
 # Panel response code that NeoHub reports when an arm command is rejected
 # because the partition is not ready to arm (for example a zone is open).

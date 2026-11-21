@@ -33,6 +33,11 @@ CAPABILITY_PARTITION_TROUBLES = "partition_troubles"
 # pushes a partition_update when one of them changes).
 CAPABILITY_PARTITION_SIREN_MEMORY = "partition_siren_memory"
 
+# Capability listed in full_state by a NeoHub that sends a "keypad_alarm"
+# message for each keypad alarm (the keypad's Fire / Auxiliary / Panic
+# keys) and the last one of each session as "last_keypad_alarm".
+CAPABILITY_KEYPAD_ALARMS = "keypad_alarms"
+
 # Values of "code_kind" in a command_result: whether "code" is the panel's
 # response code to the command or the code of a NACK from the panel
 # interface. The two code ranges overlap with different meanings.
@@ -121,6 +126,7 @@ class NeoHubClient:
         self._on_full_state: list[Callable[[dict[str, Any]], None]] = []
         self._on_partition_update: list[Callable[[dict[str, Any]], None]] = []
         self._on_zone_update: list[Callable[[dict[str, Any]], None]] = []
+        self._on_keypad_alarm: list[Callable[[dict[str, Any]], None]] = []
         self._on_error: list[Callable[[str], None]] = []
 
     @property
@@ -202,6 +208,17 @@ class NeoHubClient:
         """
         self._on_zone_update.append(callback)
         return lambda: self._on_zone_update.remove(callback)
+
+    def register_keypad_alarm_callback(
+        self, callback: Callable[[dict[str, Any]], None]
+    ) -> Callable[[], None]:
+        """Register a callback for keypad_alarm messages.
+
+        Returns:
+            A function to unregister the callback
+        """
+        self._on_keypad_alarm.append(callback)
+        return lambda: self._on_keypad_alarm.remove(callback)
 
     def register_error_callback(
         self, callback: Callable[[str], None]
@@ -478,6 +495,8 @@ class NeoHubClient:
             self._handle_zone_update(data)
         elif msg_type == "command_result":
             self._handle_command_result(data)
+        elif msg_type == "keypad_alarm":
+            self._handle_keypad_alarm(data)
         elif msg_type == "error":
             error_msg = data.get("message", "Unknown error")
             _LOGGER.error("NeoHub server error: %s", error_msg)
@@ -583,6 +602,38 @@ class NeoHubClient:
                 callback(data)
             except Exception:
                 _LOGGER.exception("Error in zone_update callback")
+
+    def _handle_keypad_alarm(self, data: dict[str, Any]) -> None:
+        """Process a keypad_alarm message.
+
+        The session's "last_keypad_alarm" in the client state is updated
+        the way NeoHub updates it, so the state matches the next full_state.
+        """
+        session_id = data.get("session_id")
+        partition = data.get("partition")
+
+        if (
+            not isinstance(session_id, str)
+            or not isinstance(partition, int)
+            or isinstance(partition, bool)
+        ):
+            _LOGGER.error(
+                "Received keypad_alarm missing required fields. Data: %s",
+                data,
+            )
+            return
+
+        if session_id in self._state:
+            self._state[session_id]["last_keypad_alarm"] = {
+                key: data.get(key)
+                for key in ("partition", "alarm_type", "code", "time")
+            }
+
+        for callback in self._on_keypad_alarm:
+            try:
+                callback(data)
+            except Exception:
+                _LOGGER.exception("Error in keypad_alarm callback")
 
     def _handle_command_result(self, data: dict[str, Any]) -> None:
         """Process a command_result message."""
