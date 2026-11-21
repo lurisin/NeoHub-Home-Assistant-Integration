@@ -18,7 +18,10 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, SIGNAL_CONNECTION_STATE, SIGNAL_STATE_UPDATED
 from .coordinator import NeoHubCoordinator
-from .pyneohub.client import CAPABILITY_PARTITION_TROUBLES
+from .pyneohub.client import (
+    CAPABILITY_PARTITION_SIREN_MEMORY,
+    CAPABILITY_PARTITION_TROUBLES,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,8 +79,11 @@ async def async_setup_entry(
     # A "trouble" sensor per partition follows the same rules, except that
     # it is created when NeoHub lists the "partition_troubles" capability
     # (from the setup state, or from the first full_state that lists it).
+    # The "siren" and "alarm in memory" sensors follow the trouble sensor's
+    # rules with the "partition_siren_memory" capability.
     ready_sensors: set[tuple[str, int]] = set()
     trouble_sensors: set[tuple[str, int]] = set()
+    siren_memory_sensors: set[tuple[str, int]] = set()
     registry = er.async_get(hass)
     setup_names: dict[tuple[str, int], str] = {
         (session_id, partition["partition_number"]): partition.get(
@@ -101,6 +107,9 @@ async def async_setup_entry(
         new: list[BinarySensorEntity] = []
         troubles_reported = (
             CAPABILITY_PARTITION_TROUBLES in coordinator.client.capabilities
+        )
+        siren_memory_reported = (
+            CAPABILITY_PARTITION_SIREN_MEMORY in coordinator.client.capabilities
         )
         for session_id, session in coordinator.state.items():
             session_name = session.get("name", f"DSC Neo {session_id}")
@@ -130,6 +139,23 @@ async def async_setup_entry(
                             partition_number=key[1],
                             partition_name=setup_names[key],
                             enabled_default=_alarm_enabled(key),
+                        )
+                    )
+                if siren_memory_reported and key not in siren_memory_sensors:
+                    siren_memory_sensors.add(key)
+                    enabled_default = _alarm_enabled(key)
+                    new.extend(
+                        sensor_class(
+                            coordinator=coordinator,
+                            session_id=session_id,
+                            session_name=session_name,
+                            partition_number=key[1],
+                            partition_name=setup_names[key],
+                            enabled_default=enabled_default,
+                        )
+                        for sensor_class in (
+                            DscPartitionSirenSensor,
+                            DscPartitionAlarmMemorySensor,
                         )
                     )
         return new
@@ -373,3 +399,98 @@ class DscPartitionTroubleSensor(BinarySensorEntity):
     def _handle_connection_state(self, connected: bool) -> None:
         """Handle a connection state change."""
         self.async_write_ha_state()
+
+
+class DscPartitionFlagSensor(BinarySensorEntity):
+    """A boolean partition flag that NeoHub reports, read from its state.
+
+    Subclasses set the state key, the unique_id suffix, the translation key
+    and the device class. A partition_update without the key keeps the last
+    value; a full_state without it (NeoHub downgraded) gives unknown.
+    """
+
+    _attr_has_entity_name = True
+    _flag_key: str
+    _unique_id_suffix: str
+
+    def __init__(
+        self,
+        coordinator: NeoHubCoordinator,
+        session_id: str,
+        session_name: str,
+        partition_number: int,
+        partition_name: str,
+        enabled_default: bool = True,
+    ) -> None:
+        """Initialize the binary sensor entity."""
+        self._coordinator = coordinator
+        self._session_id = session_id
+        self._partition_number = partition_number
+        self._attr_unique_id = (
+            f"{session_id}_partition_{partition_number}_{self._unique_id_suffix}"
+        )
+        self._attr_entity_registry_enabled_default = enabled_default
+        self._attr_translation_placeholders = {"partition": partition_name}
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, session_id)},
+            name=session_name,
+            manufacturer="DSC",
+            model="Neo",
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return the flag as NeoHub reports it."""
+        return self._coordinator.partition_flag(
+            self._session_id, self._partition_number, self._flag_key
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return True if the entity is available."""
+        return self._coordinator.connected
+
+    async def async_added_to_hass(self) -> None:
+        """Register dispatch listeners when added to hass."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                f"{SIGNAL_STATE_UPDATED}_partition_{self._session_id}_{self._partition_number}",
+                self._handle_update,
+            )
+        )
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                SIGNAL_CONNECTION_STATE,
+                self._handle_connection_state,
+            )
+        )
+
+    @callback
+    def _handle_update(self, data: dict[str, Any]) -> None:
+        """Handle a partition state update (full_state or partition_update)."""
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_connection_state(self, connected: bool) -> None:
+        """Handle a connection state change."""
+        self.async_write_ha_state()
+
+
+class DscPartitionSirenSensor(DscPartitionFlagSensor):
+    """Whether the partition's siren (bell) is sounding, as NeoHub reports it."""
+
+    _attr_translation_key = "siren"
+    _attr_device_class = BinarySensorDeviceClass.SOUND
+    _flag_key = "siren"
+    _unique_id_suffix = "siren"
+
+
+class DscPartitionAlarmMemorySensor(DscPartitionFlagSensor):
+    """Whether the panel holds an alarm in memory for the partition."""
+
+    _attr_translation_key = "alarm_memory"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _flag_key = "alarm_memory"
+    _unique_id_suffix = "alarm_memory"

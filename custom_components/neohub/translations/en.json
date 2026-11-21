@@ -39,6 +39,12 @@
             "name": "Trouble types"
           }
         }
+      },
+      "siren": {
+        "name": "{partition} siren"
+      },
+      "alarm_memory": {
+        "name": "{partition} alarm in memory"
       }
     }
   },
