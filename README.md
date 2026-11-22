@@ -201,7 +201,7 @@ A `partition_update` without these keys keeps the last value; if NeoHub stops se
 - The action takes exactly one alarm panel entity of this integration (`entity_id`, as data or as a target; not a list of several, a device, an area or a label), `type` (`fire`, `auxiliary` or `panic`, exactly) and `confirm`, which must be `true`. Anything else fails with a validation error, and nothing is sent.
 - The caller needs control permission for that alarm panel entity, as for disarming it: a read-only user (or an unknown user) gets an "unauthorized" error and nothing is sent. Automations and scripts started without a user are not limited.
 - It is sent once and never retried, not even after a timeout or a reconnect. It waits up to 10 seconds for NeoHub's result and fails with NeoHub's message if the panel rejects it. If no answer arrives it fails with "... the alarm may still have been triggered": check the keypad and the monitoring station before trying again.
-- Every FAP request and its result are logged as warnings.
+- Every FAP request and its result are logged as warnings. The Home Assistant log also shows a warning when NeoHub starts accepting FAP commands ("NeoHub at ... accepts FAP commands ...") and when it stops ("... no longer accepts FAP commands"). After the test, turn the NeoHub setting off, press Save on NeoHub's settings page, and check that the log shows "no longer accepts FAP commands".
 - There is deliberately no button, switch or other entity for it, and the alarm panel entity does not get the `trigger` feature: entities may be exposed to voice assistants, and a stray call would send a real alarm.
 
 ```yaml

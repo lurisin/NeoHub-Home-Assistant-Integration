@@ -124,6 +124,9 @@ class NeoHubClient:
         self._shutdown = False
         # Capabilities from the last full_state of the current connection.
         self._capabilities: frozenset[str] = frozenset()
+        # Whether the last full_state listed "fap" (None before the first),
+        # kept across reconnects so that only a change is logged.
+        self._fap_listed: bool | None = None
         # Commands waiting for their command_result, keyed by request_id.
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         
@@ -560,6 +563,7 @@ class NeoHubClient:
             else frozenset()
         )
         _LOGGER.debug("NeoHub capabilities: %s", sorted(self._capabilities))
+        self._log_fap_change(CAPABILITY_FAP in self._capabilities)
 
         _LOGGER.info(
             "Received full state: %d session(s), %d partition(s), %d zone(s)",
@@ -573,6 +577,31 @@ class NeoHubClient:
                 callback(data)
             except Exception:
                 _LOGGER.exception("Error in full_state callback")
+
+    def _log_fap_change(self, listed: bool) -> None:
+        """Log at WARNING when NeoHub starts or stops accepting FAP commands.
+
+        FAP commands raise a real alarm, and NeoHub's setting is the only
+        barrier, so the Home Assistant log shows whether it is on without a
+        test call. Nothing is logged while it stays off.
+        """
+        previous, self._fap_listed = self._fap_listed, listed
+        if listed == bool(previous):
+            return
+        if listed:
+            _LOGGER.warning(
+                "NeoHub at %s:%s accepts FAP commands (Fire / Auxiliary / "
+                "Panic): neohub.activate_fap can raise a real alarm that is "
+                "reported to the monitoring station",
+                self.host,
+                self.port,
+            )
+        else:
+            _LOGGER.warning(
+                "NeoHub at %s:%s no longer accepts FAP commands",
+                self.host,
+                self.port,
+            )
 
     def _handle_partition_update(self, data: dict[str, Any]) -> None:
         """Process a partition_update message."""
