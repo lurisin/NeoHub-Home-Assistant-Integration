@@ -328,6 +328,14 @@ keypad alarm times in NeoHub's format` (PR F only). On the PR branches split
 them as listed under each PR. Leave out `Bump version to 1.4.0` (fork only)
 and the `UPSTREAM_PRS.md` commits.
 
+Review fixes, after the drafts were written (each in its PR's commit list):
+`Check that the caller may control the alarm panel before a FAP alarm`,
+`Log at WARNING when NeoHub starts or stops accepting FAP commands` and
+`README: FAP alarms and AI agents` (PR G); `Fire a keypad alarm once when its
+replay and its message both arrive` and `Fire keypad alarms that arrive
+before the event entity exists` (PR F). Squash them into the PR's commits if
+preferred.
+
 The NeoHub PRs are drafted in the NeoHub fork's `UPSTREAM_PRS.md`; their
 numbers go in place of the placeholders below. The message shapes used here
 are the ones decided for NeoHub 0.4.0: `code_kind` in `command_result`;
@@ -400,6 +408,9 @@ Commits to cherry-pick, in this order:
    lines of `README_LIBRARY.md`.
 6. `README: keypad alarm times in NeoHub's format` (squash it into the README
    part of item 5).
+7. `Fire a keypad alarm once when its replay and its message both arrive`
+8. `Fire keypad alarms that arrive before the event entity exists` (with its
+   README part: the keypad alarm limits).
 
 Depends on **the NeoHub PR "trouble types, keypad alarms, siren and alarm
 memory"**: `<NEOHUB_PR_ALARMS>`.
@@ -428,22 +439,25 @@ With a NeoHub that lists the new capabilities, each partition that has an alarm 
 
 They follow the trouble sensor's rules: created at setup or with the first `full_state` that lists the capability, named after the setup-time partition names, added disabled when the partition's alarm panel entity is disabled, unknown (sensors) when NeoHub stops sending the key, unavailable after a reload against an older NeoHub. The alarm panel entity does not change: no new attribute, no `triggered`, no state change for these frames.
 
-**Replay rule.** NeoHub keeps the last keypad alarm per session as `last_keypad_alarm` in `full_state`, so an alarm that happened while the WebSocket was down is not lost. The coordinator remembers the newest keypad alarm time (NeoHub's clock) seen per session in this run. The first `full_state` after the integration starts or reloads only records it and never fires (a restart does not repeat an old alarm); a later `full_state` fires it only if its time is strictly newer; a `keypad_alarm` message updates the newest time. Only NeoHub's times are compared.
+**Replay rule.** NeoHub keeps the last keypad alarm per session as `last_keypad_alarm` in `full_state`, so an alarm that happened while the WebSocket was down is not lost. The coordinator remembers the newest keypad alarm time (NeoHub's clock) seen per session in this run. The first `full_state` after the integration starts or reloads only records it and never fires (a restart does not repeat an old alarm); a later `full_state` fires it only if its time is strictly newer; a `keypad_alarm` message updates the newest time. A `keypad_alarm` message whose time is that of an alarm just fired from a `full_state` is not fired again (after a reconnect NeoHub's `full_state` can arrive before its broadcast of the same alarm). Only NeoHub's times are compared.
+
+**Alarms before the entity exists.** A keypad alarm for a partition whose event entity is not added yet (during the setup's stable-state wait, or before the entities of a newly listed capability are added) is kept, at most 10 per partition for 5 minutes, and fired by the entity when it is added, after its first state write. The first-`full_state` rule above keeps an alarm stored at NeoHub from being fired at every start.
 
 The README states that Home Assistant shows no `triggered` for keypad or other alarms (detection relies on the event entity and the siren sensor) and gives trigger forms that skip the event entity's state changes on reconnects, reloads and entity creation: `event.received` where Home Assistant has it, or a state trigger with `not_from: unavailable`, `not_to: [unavailable, unknown]` and a `trigger.from_state is not none` condition.
 
 ## Testing
 
 - compileall, imports and hassfest on Home Assistant 2026.11.2 and 2026.2.3: 0 invalid integrations.
-- Real `hass` with the real client and a fake NeoHub in seven protocol generations (the previous three, all new capabilities, and each new capability on its own), on both versions (110 checks, 111 on 2026.11.2): each entity only with its own capability; registry entries (unique_ids, translation keys, device classes, device, names), states from `full_state` and `partition_update`, keys kept when missing, non-bool values; `trouble_types` only on the trouble sensor; keypad events for `fire`/3, `unknown`/9 and an unknown `alarm_type`, dropped for partitions 0 and 5 and an unknown session, malformed messages logged; the replay rule (no fire from the first `full_state`, none for an equal or older time, one for a strictly newer time after a reconnect, none on a repeat, a fire when the first `full_state` had none, 7-digit `Z` and `+00:00` times); a reload keeps the restored event state and does not fire; downgrade, reload against an older NeoHub, upgrade while Home Assistant runs (setup-time names, disabled for a disabled alarm entity); 0 `state_changed` events on the alarm panel entity and 0 runs of a state trigger on it without `to:`/`from:` for all new frame kinds; the recommended trigger forms ran exactly once per alarm and never for reconnects, reloads or creation.
+- Real `hass` with the real client and a fake NeoHub in seven protocol generations (the previous three, all new capabilities, and each new capability on its own), on both versions (110 checks, 111 on 2026.11.2): each entity only with its own capability; registry entries (unique_ids, translation keys, device classes, device, names), states from `full_state` and `partition_update`, keys kept when missing, non-bool values; `trouble_types` only on the trouble sensor; keypad events for `fire`/3, `unknown`/9 and an unknown `alarm_type`, dropped for partitions 0 and 5 and an unknown session, malformed messages logged; the replay rule (no fire from the first `full_state`, none for an equal or older time, one for a strictly newer time after a reconnect, none on a repeat, a fire when the first `full_state` had none, 7-digit `Z` and `+00:00` times); a reload keeps the restored event state and does not fire; downgrade, reload against an older NeoHub, upgrade while Home Assistant runs (setup-time names, disabled for a disabled alarm entity); 0 `state_changed` events on the alarm panel entity and 0 runs of a state trigger on it without `to:`/`from:` for all new frame kinds; the recommended trigger forms ran exactly once per alarm and never for reconnects, reloads or creation in these sequences (before the review fix, a replay followed by the live message of the same alarm ran them twice).
 - Home Assistant restart in two processes, on both versions: the event entity is restored (time, type, code), the first `full_state` does not fire even with a newer `last_keypad_alarm`, and a new `keypad_alarm` fires once.
+- Review fixes, on both versions with real `hass` and the real setup wait: a live keypad alarm 1 s into setup fires once when the entity is added (both recommended trigger forms run once), while the older alarm of the first `full_state` does not fire (with that rule removed, it does: the test fails); an alarm for a disabled partition entity is kept and not fired; a replay and the live message of the same alarm, 0 ms and 50 ms apart, fire once; a second live message with the same time still fires.
 - Upgrade tests (stop, swap the code, start) from the previous three versions, customized (renamed entity IDs and names, labels, areas, aliases, the default code option, hidden and disabled zones, device name and area, entry title, the ready and trouble sensors), with one partition and with four partitions whose alarm panel entities 2-4 were disabled: every existing entity, device and config entry identical in the registries and on disk; the only new entities are the expected ones, on the alarm's device, enabled for partition 1 and disabled by the integration for 2-4.
 - Previous versions against the new NeoHub protocol: they log one warning "Unknown message type 'keypad_alarm'" per message and otherwise ignore it and the new keys.
 
 ## Not tested
 
-- On a real panel and against a real NeoHub build of the dependency PR: the tests use a fake NeoHub with the decided message shapes. The keypad alarm type 9 is not identified yet.
-- A keypad alarm that arrives between the first `full_state` and the creation of the entities (during setup) is recorded as seen but has no entity to fire on.
+- On a real panel and against a real NeoHub build of the dependency PR: the tests use a fake NeoHub with the decided message shapes (frames captured from the NeoHub PR's serializer were replayed separately). The keypad alarm type 9 is not identified yet.
+- Two keypad alarms in the same millisecond have equal times: after a reconnect the second would count as already seen.
 ```
 
 ### PR G (experimental, only with the owner's explicit OK): `neohub.activate_fap`
@@ -456,6 +470,12 @@ Commits to cherry-pick:
    section, the `activate_fap` WebSocket message, the `fap` capability bullet,
    the FAP parts of the `command_result` bullets, and the `activate_fap` entry
    of `README_LIBRARY.md`.
+
+Review fixes, in this order after commit 2:
+
+3. `Check that the caller may control the alarm panel before a FAP alarm`
+4. `Log at WARNING when NeoHub starts or stops accepting FAP commands`
+5. `README: FAP alarms and AI agents`
 
 Depends on **the NeoHub PR "FAP command (experimental)"**: `<NEOHUB_PR_FAP>`,
 and applies on top of PR E and PR F.
@@ -484,13 +504,15 @@ Add an experimental neohub.activate_fap action (Fire / Auxiliary / Panic)
 - A domain action `neohub.activate_fap`, registered in `async_setup` (with a config-entry-only `CONFIG_SCHEMA`). Every argument is checked before anything is sent; each invalid call raises `ServiceValidationError`: exactly one `alarm_control_panel` entity of a loaded entry (`entity_id` as data or as a target; no `all`, no list of several, no device, area, floor or label), `type` exactly `fire`, `auxiliary` or `panic`, and `confirm` exactly `true`.
 - It raises `HomeAssistantError` if NeoHub does not list the `fap` capability (no fallback for an older NeoHub; NeoHub lists it only while FAP commands are turned on in its settings), and with NeoHub's message if the command fails or is not confirmed ("... the alarm may still have been triggered").
 - pyneohub `activate_fap()` sends `{"type": "activate_fap", "session_id", "partition", "fap_type", "request_id"}` once and waits for the `command_result`; nothing retries it. The alarm kind is `fap_type` because `type` is the message type. The request and result handling of the partition commands moved into two helpers; their frames and texts are unchanged.
-- Every FAP request and its result are logged at Warning.
-- `services.yaml` uses an `entity_id` field with a single-entity selector (not a `target`), so the UI offers exactly one alarm panel entity. There is no button, switch or other entity, and the alarm panel entity does not get the `TRIGGER` feature: entities may be exposed to voice assistants.
+- Every FAP request and its result are logged at Warning, and so is every change of the `fap` capability ("NeoHub at ... accepts FAP commands ..." / "... no longer accepts FAP commands"), so the log shows whether NeoHub accepts them without a test call.
+- The caller needs control permission for the alarm panel entity, as for an entity service: an unknown user raises `UnknownUser`, a user without control permission `Unauthorized`, after the arguments are checked and before anything is sent. A domain action does not get that check from Home Assistant by itself; without it a read-only user could raise a real alarm.
+- `services.yaml` uses an `entity_id` field with a single-entity selector (not a `target`), so the UI offers exactly one alarm panel entity. There is no button, switch or other entity, and the alarm panel entity does not get the `TRIGGER` feature: entities may be exposed to voice assistants. That keeps it away from the Assist API, but an LLM agent given the admin-only "Home Assistant" LLM API (2026.11) can call any action, this one included; the README says so, and the action's description tells assistants never to call it (not a barrier: NeoHub's setting is).
 
 ## Testing
 
 - compileall, imports and hassfest on Home Assistant 2026.11.2 and 2026.2.3: 0 invalid integrations.
 - Real `hass` with the real client and a fake NeoHub, on both versions: without `fap` -> `HomeAssistantError`, 0 frames; 33 invalid calls (no entity, two entities, a comma list, `all`, `none`, an empty list, a zone, a number, a template alarm panel, a bare state, a missing entity, a user-disabled alarm entity, type missing / `Fire` / `FIRE` / `fires` / 0 / null / a list, confirm missing / false / `"true"` / 1 / `"yes"` / null, `device_id`, `area_id`, `label_id`, extra keys, `fap_type` instead of `type`, a device target, a target with two entities) -> `ServiceValidationError`, 0 frames each; success in data and target form -> exactly one frame with the keys in order; failures (response 23, NACK 9, setting off, NeoHub's panel timeout text) -> `HomeAssistantError` with NeoHub's message, one frame each; a silent NeoHub -> fails after the client timeout with "... the alarm may still have been triggered", one frame, none later; the socket closed while waiting -> fails at once, and after the reconnect still exactly one frame; the send itself failing -> "Could not send the command to NeoHub (...); the alarm may still have been triggered", no retry; the capability withdrawn -> 0 frames; NeoHub not connected -> 0 frames; 0 changes of the alarm panel entity.
+- Review fixes, on both versions: a read-only user -> `Unauthorized` and an unknown user id -> `UnknownUser`, 0 frames each (before the fix: one frame each); a non-admin user with control permission, an admin and a call without user -> one frame each; invalid arguments from a read-only user still give `ServiceValidationError`; the `fap` WARNING once at setup, nothing on a reconnect, once when it is withdrawn and once when it is listed again, none for an entry whose NeoHub never lists it.
 
 ## Not tested
 
