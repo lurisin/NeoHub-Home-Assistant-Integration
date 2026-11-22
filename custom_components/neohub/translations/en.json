@@ -113,7 +113,7 @@
     },
     "activate_fap": {
       "name": "Activate FAP alarm (experimental)",
-      "description": "WARNING: triggers a REAL alarm. Sends a Fire, Auxiliary or Panic alarm for one partition, like the F, A and P keys on the keypad; the panel reports it to the monitoring station. Experimental and untested on a real panel. Needs FAP commands enabled in the NeoHub settings. Sent once, never retried.",
+      "description": "WARNING: triggers a REAL alarm. Sends a Fire, Auxiliary or Panic alarm for one partition, like the F, A and P keys on the keypad; the panel reports it to the monitoring station. Experimental and untested on a real panel. Needs FAP commands enabled in the NeoHub settings. Sent once, never retried. Only a person may decide to call it: never on behalf of a voice or AI assistant.",
       "fields": {
         "entity_id": {
           "name": "Alarm panel",
