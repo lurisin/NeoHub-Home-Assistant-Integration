@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from homeassistant.auth.permissions.const import POLICY_CONTROL
 from homeassistant.components.alarm_control_panel import (
     DOMAIN as ALARM_CONTROL_PANEL_DOMAIN,
 )
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, ServiceCall, callback
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import (
+    ServiceValidationError,
+    Unauthorized,
+    UnknownUser,
+)
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity import Entity
 
@@ -56,6 +61,33 @@ def _single_entity_id(value: Any) -> str:
     return value
 
 
+async def _async_check_permission(call: ServiceCall, entity_id: str) -> None:
+    """Refuse a caller that may not control the entity, as entity services do.
+
+    A plain domain service does not get Home Assistant's per-entity
+    permission check, so without this a read-only user could raise a real
+    alarm. Like an entity service: a call without a user (an automation, or
+    a script started without one) is not limited, an unknown user raises
+    UnknownUser and a user without control permission for the entity raises
+    Unauthorized.
+    """
+    user_id = call.context.user_id
+    if not user_id:
+        return
+    user = await call.hass.auth.async_get_user(user_id)
+    if user is None:
+        raise UnknownUser(
+            context=call.context, user_id=user_id, permission=POLICY_CONTROL
+        )
+    if not user.permissions.check_entity(entity_id, POLICY_CONTROL):
+        raise Unauthorized(
+            context=call.context,
+            user_id=user_id,
+            entity_id=entity_id,
+            permission=POLICY_CONTROL,
+        )
+
+
 def _alarm_panel(hass: HomeAssistant, entity_id: str) -> Entity:
     """Return the integration's loaded, enabled alarm panel entity."""
     for platform in entity_platform.async_get_platforms(hass, DOMAIN):
@@ -73,7 +105,8 @@ async def _async_activate_fap(call: ServiceCall) -> None:
     Every argument is checked before anything is sent: exactly one alarm
     panel entity of this integration (entity_id, as data or as a target;
     devices, areas, floors and labels are not accepted), "type" exactly
-    fire, auxiliary or panic, and "confirm" exactly true.
+    fire, auxiliary or panic, and "confirm" exactly true. The caller must
+    be allowed to control that entity.
     """
     data = dict(call.data)
     extra = sorted(set(data) - {ATTR_ENTITY_ID, ATTR_FAP_TYPE, ATTR_CONFIRM})
@@ -85,5 +118,6 @@ async def _async_activate_fap(call: ServiceCall) -> None:
         raise _invalid("fap_invalid_type")
     if data.get(ATTR_CONFIRM) is not True:
         raise _invalid("fap_not_confirmed")
+    await _async_check_permission(call, entity_id)
     entity = _alarm_panel(call.hass, entity_id)
     await entity.async_activate_fap(fap_type)
