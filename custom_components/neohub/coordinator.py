@@ -4,17 +4,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import SIGNAL_CONNECTION_STATE, SIGNAL_KEYPAD_ALARM, SIGNAL_STATE_UPDATED
 from .pyneohub import NeoHubClient, NeoHubConnectionError
 
 _LOGGER = logging.getLogger(__name__)
+
+# A keypad alarm for a partition whose event entity does not exist yet (for
+# example while the integration sets up) is kept this long, at most this many
+# per partition, and fired when the entity is added.
+KEYPAD_ALARM_UNDELIVERED_MAX_AGE = 300.0
+KEYPAD_ALARM_UNDELIVERED_MAX = 10
 
 
 def _neohub_time(value: Any) -> datetime | None:
@@ -58,6 +65,12 @@ class NeoHubCoordinator:
         # The time of the last keypad alarm fired from a full_state, per
         # session: its live keypad_alarm message is not fired again.
         self._keypad_alarm_replayed: dict[str, datetime] = {}
+        # Event entities that are added, and keypad alarms that came for a
+        # partition before its entity was (monotonic time, alarm).
+        self._keypad_alarm_entities: set[tuple[str, int]] = set()
+        self._keypad_alarm_undelivered: dict[
+            tuple[str, int], list[tuple[float, dict[str, Any]]]
+        ] = {}
 
     @property
     def client(self) -> NeoHubClient:
@@ -325,11 +338,62 @@ class NeoHubCoordinator:
             partition_number,
             session_id,
         )
+        key = (session_id, partition_number)
+        if key not in self._keypad_alarm_entities:
+            # No event entity yet (the integration is still setting up, or
+            # NeoHub has just started to report keypad alarms): keep it for
+            # the entity, which fires it when it is added.
+            undelivered = self._keypad_alarm_undelivered.setdefault(key, [])
+            undelivered.append((time.monotonic(), alarm))
+            del undelivered[:-KEYPAD_ALARM_UNDELIVERED_MAX]
+            _LOGGER.debug(
+                "No keypad alarm entity for partition %s of session %s yet; "
+                "the alarm is fired when it is added",
+                partition_number,
+                session_id,
+            )
+            return
         async_dispatcher_send(
             self.hass,
             f"{SIGNAL_KEYPAD_ALARM}_{session_id}_{partition_number}",
             alarm,
         )
+
+    @callback
+    def async_register_keypad_alarm_entity(
+        self, session_id: str, partition_number: int
+    ) -> Callable[[], None]:
+        """Note that a partition's keypad alarm event entity is added.
+
+        From now on its keypad alarms are dispatched to it. Returns the
+        function that undoes this when the entity is removed.
+        """
+        key = (session_id, partition_number)
+        self._keypad_alarm_entities.add(key)
+
+        @callback
+        def _unregister() -> None:
+            self._keypad_alarm_entities.discard(key)
+
+        return _unregister
+
+    @callback
+    def async_take_undelivered_keypad_alarms(
+        self, session_id: str, partition_number: int
+    ) -> list[dict[str, Any]]:
+        """Return (and forget) a partition's keypad alarms that had no entity.
+
+        Only those of the last KEYPAD_ALARM_UNDELIVERED_MAX_AGE seconds.
+        """
+        undelivered = self._keypad_alarm_undelivered.pop(
+            (session_id, partition_number), []
+        )
+        now = time.monotonic()
+        return [
+            alarm
+            for received, alarm in undelivered
+            if now - received <= KEYPAD_ALARM_UNDELIVERED_MAX_AGE
+        ]
 
     def _handle_partition_update(self, data: dict[str, Any]) -> None:
         """Handle partition_update message from client."""

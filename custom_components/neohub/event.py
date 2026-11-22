@@ -153,6 +153,31 @@ class DscPartitionKeypadAlarmEvent(EventEntity):
                 self._handle_connection_state,
             )
         )
+        self.async_on_remove(
+            self._coordinator.async_register_keypad_alarm_entity(
+                self._session_id, self._partition_number
+            )
+        )
+        # Keypad alarms that came before this entity existed (for example
+        # while the integration set up). Fired after the entity's first state
+        # is written, so that they look like any other keypad alarm.
+        handle = self.hass.loop.call_soon(self._fire_undelivered_keypad_alarms)
+        self.async_on_remove(handle.cancel)
+
+    @callback
+    def _fire_undelivered_keypad_alarms(self) -> None:
+        """Fire the keypad alarms that came before this entity was added."""
+        for alarm in self._coordinator.async_take_undelivered_keypad_alarms(
+            self._session_id, self._partition_number
+        ):
+            _LOGGER.info(
+                "Firing keypad alarm %s (code %s) of partition %s, which came "
+                "before its event entity was added",
+                alarm.get("alarm_type"),
+                alarm.get("code"),
+                self._partition_number,
+            )
+            self._handle_keypad_alarm(alarm)
 
     @callback
     def _handle_keypad_alarm(self, alarm: dict[str, Any]) -> None:
