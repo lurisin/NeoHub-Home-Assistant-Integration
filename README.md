@@ -421,7 +421,7 @@ Sent in response to `get_full_state`. Contains the complete hierarchy.
         "partition": 2,
         "alarm_type": "fire",
         "code": 3,
-        "time": "2026-01-01T10:00:00.0000000Z"
+        "time": "2026-01-01T10:00:00.000Z"
       }
     }
   ],
@@ -475,7 +475,7 @@ Pushed whenever a zone's state changes.
 
 #### `keypad_alarm`
 
-Sent by a NeoHub that lists `keypad_alarms` when the panel reports a keypad alarm (the F, A and P keys). `alarm_type` is `fire` (panel alarm type 3) or `unknown` (any other type, including 9); `code` is the panel's alarm type number; `time` is when NeoHub received it (UTC, ISO 8601, NeoHub's clock). `partition` may be a partition the client does not know (for example 0). The partition's `status` does not change.
+Sent by a NeoHub that lists `keypad_alarms` when the panel reports a keypad alarm (the F, A and P keys). `alarm_type` is `fire` (panel alarm type 3) or `unknown` (any other type, including 9); `code` is the panel's alarm type number; `time` is when NeoHub received it (UTC, ISO 8601 with milliseconds and `Z`, NeoHub's clock). `partition` may be a partition the client does not know (for example 0). The partition's `status` does not change.
 
 ```json
 {
@@ -484,7 +484,7 @@ Sent by a NeoHub that lists `keypad_alarms` when the panel reports a keypad alar
   "partition": 1,
   "alarm_type": "fire",
   "code": 3,
-  "time": "2026-01-01T10:00:00.0000000Z"
+  "time": "2026-01-01T10:00:00.000Z"
 }
 ```
 
