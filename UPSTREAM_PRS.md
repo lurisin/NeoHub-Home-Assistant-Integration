@@ -323,9 +323,10 @@ PR G conflicts without PR E and PR F. So submit them in this order, each after
 the previous one is merged.
 
 The README changes of all three are in one fork commit, `README: keypad alarms,
-siren and memory, trouble types, FAP, protocol`. On the PR branches split it as
-listed under each PR. Leave out `Bump version to 1.4.0` (fork only) and the
-`UPSTREAM_PRS.md` commits.
+siren and memory, trouble types, FAP, protocol`, plus the follow-up `README:
+keypad alarm times in NeoHub's format` (PR F only). On the PR branches split
+them as listed under each PR. Leave out `Bump version to 1.4.0` (fork only)
+and the `UPSTREAM_PRS.md` commits.
 
 The NeoHub PRs are drafted in the NeoHub fork's `UPSTREAM_PRS.md`; their
 numbers go in place of the placeholders below. The message shapes used here
@@ -397,6 +398,8 @@ Commits to cherry-pick, in this order:
    capabilities list without the `fap` bullet, the `partition_update` text and
    the `keypad_alarm` message; the `state` and `register_keypad_alarm_callback`
    lines of `README_LIBRARY.md`.
+6. `README: keypad alarm times in NeoHub's format` (squash it into the README
+   part of item 5).
 
 Depends on **the NeoHub PR "trouble types, keypad alarms, siren and alarm
 memory"**: `<NEOHUB_PR_ALARMS>`.
