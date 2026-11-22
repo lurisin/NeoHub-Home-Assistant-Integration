@@ -55,6 +55,9 @@ class NeoHubCoordinator:
         # a full_state has been handled yet.
         self._keypad_alarm_newest: dict[str, datetime] = {}
         self._full_state_seen = False
+        # The time of the last keypad alarm fired from a full_state, per
+        # session: its live keypad_alarm message is not fired again.
+        self._keypad_alarm_replayed: dict[str, datetime] = {}
 
     @property
     def client(self) -> NeoHubClient:
@@ -273,12 +276,25 @@ class NeoHubCoordinator:
             session_id,
             alarm.get("time"),
         )
+        self._keypad_alarm_replayed[session_id] = alarm_time
         self._dispatch_keypad_alarm(session_id, alarm)
 
     def _handle_keypad_alarm(self, data: dict[str, Any]) -> None:
         """Handle keypad_alarm message from client."""
         session_id = data["session_id"]
         alarm_time = _neohub_time(data.get("time"))
+        if alarm_time is not None and alarm_time == self._keypad_alarm_replayed.get(
+            session_id
+        ):
+            # After a reconnect NeoHub's full_state can reach us before its
+            # keypad_alarm broadcast of the same alarm: it was fired already.
+            _LOGGER.debug(
+                "Keypad alarm of session %s at %s was already fired from "
+                "full_state; not fired again",
+                session_id,
+                data.get("time"),
+            )
+            return
         if alarm_time is not None:
             newest = self._keypad_alarm_newest.get(session_id)
             if newest is None or alarm_time > newest:
